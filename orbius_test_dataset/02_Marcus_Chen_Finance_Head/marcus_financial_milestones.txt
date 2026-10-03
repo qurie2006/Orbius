@@ -1,0 +1,7 @@
+# Financial Milestones & Payment Schedule
+Owner: Marcus Chen (Finance)
+
+Milestone 1 (May 15): 30% initial deposit on hardware manufacturing ($10,500).
+Milestone 2 (July 01): Cloud infrastructure setup and Vertex AI baseline verification ($40,000).
+Milestone 3 (August 15): Delivery of 24 kiosk terminals to regional warehouses ($24,500).
+Milestone 4 (September 30): Final acceptance test and security sign-off ($25,000).

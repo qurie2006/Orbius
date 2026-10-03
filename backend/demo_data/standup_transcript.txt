@@ -1,0 +1,12 @@
+Standup transcript — Lumen Checkout
+Attendees: Jordan Hale (PM), Aisha Rahman (Design), Leo Park (Eng)
+
+Jordan: Scope is in-store kiosk plus a companion staff tablet. Out of scope: native mobile apps.
+
+Aisha: Wireframe v2 shows a three-step flow: scan, pay, receipt. Accessibility contrast on the pink CTAs is still too low.
+
+Leo: Risk — the current POS vendor has a 14-day change window. If we miss it we slip a sprint.
+
+Jordan: Assumption is that existing SKU data can be imported via CSV. We still need an owner for acceptance criteria on offline mode.
+
+Aisha: Stakeholders are Priya (client sponsor), Marcus (finance), and store ops leads.

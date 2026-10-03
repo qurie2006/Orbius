@@ -1,0 +1,20 @@
+From: Marcus Chen <marcus.chen@retailtech.io>
+To: Priya Mehta <priya.mehta@retailtech.io>, Elena Rostova <elena.rostova@retailtech.io>
+Subject: Budget Lock: Strict $180,000 Capital Cap for Kiosk Pilot
+
+Hi Priya and Elena,
+
+Following our finance committee review, I have locked the total project budget ceiling at $180,000.
+
+Key Financial Constraints:
+1. Under no circumstance may cloud and contractor expenses exceed the $180k limit.
+2. Hardware purchase orders must be finalized by next week to avoid international shipping surcharges.
+3. We need to schedule a vendor audit call with the hardware supplier before October to sign off on maintenance SLAs.
+
+Action Items:
+- Schedule supplier review meeting for next Tuesday.
+- Send the hardware spec sheet to procurement.
+
+Best regards,
+Marcus Chen
+Head of Finance & Operations

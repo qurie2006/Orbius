@@ -1,0 +1,15 @@
+LUMEN RETAIL — PROJECT BRIEF (PDF extract)
+
+Objective: Reduce average checkout time by 30% in flagship stores using an AI-assisted kiosk.
+
+Functional requirements:
+- Scan barcodes and QR codes
+- Apply loyalty discounts
+- Print or email receipts
+- Staff override with 2FA
+
+Non-functional:
+- P99 latency under 400ms for scan lookup
+- Offline queue for up to 50 baskets
+
+Open question: who owns the PCI-DSS questionnaire?

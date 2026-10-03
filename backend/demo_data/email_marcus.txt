@@ -1,0 +1,14 @@
+From: Marcus Chen <marcus@lumenretail.com>
+To: Jordan Hale <jordan@orbius.dev>
+Cc: Priya Mehta <priya@lumenretail.com>
+Subject: Timeline correction + design freeze
+
+Jordan —
+
+Quick correction from finance: the go-live window is Q4, not Q3. We cannot staff stores before October.
+
+Final designs due next month. If we miss that, holiday inventory planning slips.
+
+Also: WCAG 2.2 AA is a hard constraint for the kiosk screens.
+
+Marcus

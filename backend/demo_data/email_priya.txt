@@ -1,0 +1,17 @@
+From: Priya Mehta <priya@lumenretail.com>
+To: Jordan Hale <jordan@orbius.dev>
+Date: 2026-10-01
+Subject: Lumen Checkout — kickoff notes
+
+Hi Jordan,
+
+We need the Lumen self-checkout redesign to support 2FA for store managers and guest checkout for shoppers.
+
+Please email the client today confirming we received the wireframes and that security review is on the calendar.
+
+Launch is locked for Q3 according to the board packet I attached last week.
+
+Budget ceiling is $180k including design and the Vertex AI usage.
+
+Thanks,
+Priya

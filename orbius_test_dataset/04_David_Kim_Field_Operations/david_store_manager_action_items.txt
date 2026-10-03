@@ -1,0 +1,14 @@
+From: David Kim <david.kim@retailtech.io>
+To: Priya Mehta <priya.mehta@retailtech.io>
+Subject: Staffing constraints and supervisor tablet requirements
+
+Hi Priya,
+
+Following our store walkthrough:
+- We need to confirm who owns the training manual for store supervisors by next week.
+- Please verify whether the supervisor override tablet works over in-store private Wi-Fi when the WAN internet is down.
+- Reminder: Schedule associate training sessions for late September.
+
+Thanks,
+David Kim
+Store Operations Manager

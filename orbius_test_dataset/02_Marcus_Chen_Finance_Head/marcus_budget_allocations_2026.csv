@@ -1,0 +1,6 @@
+Line_Item,Department,Allocated_Budget_USD,Max_Ceiling_USD,Quarter,Approved_By,Notes
+Core Kiosk Frontend & Scanner UX,Software Engineering,65000,70000,Q3,Marcus Chen,Contractor and internal dev costs
+Vertex AI & Cloud Data Pipeline,Infrastructure & AI,40000,45000,Q3,Marcus Chen,GCP inference and catalog embeddings
+2FA Security & Compliance Audit,Cybersecurity,25000,30000,Q3,Marcus Chen,External penetration testing
+Store Pilot Hardware Rollout,Procurement,35000,40000,Q3,Marcus Chen,24 touch units and mounting brackets
+Contingency & Risk Reserve,Finance,15000,20000,Q3,Marcus Chen,Emergency buffer

@@ -184,64 +184,83 @@ async def run_pipeline(
     yield {"type": "plan", "agents": ["text", "vision", "document"], "router": router_current()}
     yield {"type": "delegation", "event": emit_event("orchestrator", 0, "plan parallel extraction", "running")}
 
-    async def text_job():
-        findings = run_specialist("text_agent", text_chunks, "functional_requirements")
-        budget = run_specialist(
-            "budget_agent",
-            text_chunks + doc_chunks,
-            "budget",
-            extra_prompt="Focus on money, ceilings, line items.",
-        )
-        risk = run_specialist(
-            "risk_agent",
-            text_chunks,
-            "risks",
-            extra_prompt="Focus on compliance, legal, operational risk.",
-        )
-        ops = run_ops(text_chunks)
-        return findings + budget + risk, ops, [
-            DelegationEvent(agent="text_agent", level=1, task="emails & transcripts", status="kept"),
-            DelegationEvent(agent="budget_agent", level=2, task="financial constraints", status="kept"),
-            DelegationEvent(agent="risk_agent", level=2, task="compliance & risks", status="kept"),
-            DelegationEvent(agent="ops_agent", level=2, task="tasks vs requirements", status="kept"),
-        ]
+    # Yield preliminary section skeletons immediately so UI responds in <100ms
+    preliminary_sections = [
+        BrdSection(id=sid, title=title, body="*Extracting requirements from multi-modal sources...*", finding_ids=[])
+        for sid, title in BRD_TITLES.items()
+    ]
+    for sec in preliminary_sections:
+        yield {"type": "section", "section": sec.model_dump(), "router": router_current()}
 
-    async def vision_job():
-        if not vision_chunks:
-            return [], [DelegationEvent(agent="vision_agent", level=1, task="wireframes", status="dropped", detail="no images")]
-        findings = run_specialist(
+    yield {"type": "delegation", "event": emit_event("text_agent", 1, "extracting requirements", "running")}
+    yield {"type": "delegation", "event": emit_event("budget_agent", 2, "extracting financial constraints", "running")}
+    yield {"type": "delegation", "event": emit_event("risk_agent", 2, "extracting compliance & risks", "running")}
+    yield {"type": "delegation", "event": emit_event("ops_agent", 2, "synthesizing action items", "running")}
+    if vision_chunks:
+        yield {"type": "delegation", "event": emit_event("vision_agent", 1, "parsing wireframes", "running")}
+    if doc_chunks:
+        yield {"type": "delegation", "event": emit_event("document_agent", 1, "parsing docs & sheets", "running")}
+    yield {"type": "router", **router_current()}
+
+    # Run ALL specialist agents in PARALLEL worker threads using asyncio.to_thread
+    text_task = asyncio.to_thread(run_specialist, "text_agent", text_chunks, "functional_requirements")
+    budget_task = asyncio.to_thread(
+        run_specialist, "budget_agent", text_chunks + doc_chunks, "budget", "Focus on money, ceilings, line items."
+    )
+    risk_task = asyncio.to_thread(
+        run_specialist, "risk_agent", text_chunks, "risks", "Focus on compliance, legal, operational risk."
+    )
+    ops_task = asyncio.to_thread(run_ops, text_chunks)
+
+    vision_task = (
+        asyncio.to_thread(
+            run_specialist,
             "vision_agent",
             vision_chunks,
             "functional_requirements",
-            extra_prompt="Describe UI elements and treat bbox as evidence region.",
+            "Describe UI elements and treat bbox as evidence region.",
         )
-        return findings, [DelegationEvent(agent="vision_agent", level=1, task="wireframes & screenshots", status="kept")]
+        if vision_chunks
+        else None
+    )
 
-    async def doc_job():
-        if not doc_chunks:
-            return [], [DelegationEvent(agent="document_agent", level=1, task="pdfs/sheets", status="dropped", detail="none")]
-        findings = run_specialist("document_agent", doc_chunks, "objectives")
-        return findings, [DelegationEvent(agent="document_agent", level=1, task="pdfs & spreadsheets", status="kept")]
+    doc_task = (
+        asyncio.to_thread(run_specialist, "document_agent", doc_chunks, "objectives")
+        if doc_chunks
+        else None
+    )
 
-    yield {"type": "delegation", "event": emit_event("text_agent", 1, "extract", "running")}
-    yield {"type": "delegation", "event": emit_event("vision_agent", 1, "extract", "running")}
-    yield {"type": "delegation", "event": emit_event("document_agent", 1, "extract", "running")}
-    yield {"type": "router", **router_current()}
+    # Await all parallel LLM agent calls simultaneously
+    results = await asyncio.gather(
+        text_task,
+        budget_task,
+        risk_task,
+        ops_task,
+        vision_task or asyncio.sleep(0, result=[]),
+        doc_task or asyncio.sleep(0, result=[]),
+    )
 
-    t_res, v_res, d_res = await asyncio.gather(text_job(), vision_job(), doc_job())
-    t_findings, ops_items, t_events = t_res
-    v_findings, v_events = v_res
-    d_findings, d_events = d_res
+    t_findings, budget_findings, risk_findings, ops_items, v_findings, d_findings = results
+
+    t_events = [
+        DelegationEvent(agent="text_agent", level=1, task="emails & transcripts", status="kept"),
+        DelegationEvent(agent="budget_agent", level=2, task="financial constraints", status="kept"),
+        DelegationEvent(agent="risk_agent", level=2, task="compliance & risks", status="kept"),
+        DelegationEvent(agent="ops_agent", level=2, task="tasks vs requirements", status="kept"),
+    ]
+    v_events = [DelegationEvent(agent="vision_agent", level=1, task="wireframes & screenshots", status="kept" if vision_chunks else "dropped")]
+    d_events = [DelegationEvent(agent="document_agent", level=1, task="pdfs & spreadsheets", status="kept" if doc_chunks else "dropped")]
 
     for ev in t_events + v_events + d_events:
         events.append(ev)
         yield {"type": "delegation", "event": ev.model_dump()}
 
-    all_findings = t_findings + v_findings + d_findings
+    all_findings = t_findings + budget_findings + risk_findings + v_findings + d_findings
     kept, conflicts, gaps = validate(all_findings)
     tasks, alerts = persist_ops(ops_items)
 
-    sections = compose_sections(kept, conflicts, chunks)
+    # Compose final sections & diagrams in threadpool
+    sections = await asyncio.to_thread(compose_sections, kept, conflicts, chunks)
     version = 1
     prev = SESSIONS.get(session_id)
     changelog = []
@@ -264,7 +283,6 @@ async def run_pipeline(
         ]
 
     for section in sections:
-        await asyncio.sleep(0.12)
         yield {"type": "section", "section": section.model_dump(), "router": router_current()}
 
     state = {

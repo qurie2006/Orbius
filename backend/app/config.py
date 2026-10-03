@@ -10,9 +10,9 @@ class Settings(BaseModel):
     db_path: Path = Path(__file__).resolve().parent.parent / "orbius.db"
     demo_dir: Path = Path(__file__).resolve().parent.parent / "demo_data"
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
-    primary_model: str = "gemini-2.0-flash"
-    fallback_model: str = "gemini-2.0-flash-lite"
-    last_resort_model: str = "gemini-1.5-flash"
+    primary_model: str = "gemini-3.8-flash"
+    fallback_model: str = "gemini-3.5-flash"
+    last_resort_model: str = "gemini-3.5-flash-lite"
     max_ops_per_document: int = 6
     ops_confidence_threshold: float = 0.55
 

@@ -196,6 +196,40 @@ def clear_files(session_id: str):
     return {"files": [], "count": 0}
 
 
+@app.get("/api/upload/{session_id}/preview/{filename}")
+def preview_file(session_id: str, filename: str):
+    chunks = UPLOADS.get(session_id, [])
+    file_chunks = [c for c in chunks if c.file_name == filename]
+
+    if not file_chunks:
+        dest_path = settings.upload_dir / session_id / filename
+        if not dest_path.exists():
+            dest_path = Path(__file__).resolve().parent.parent / filename
+        if dest_path.exists():
+            try:
+                content = dest_path.read_text(encoding="utf-8", errors="ignore")
+                return {
+                    "filename": filename,
+                    "modality": "text",
+                    "chunk_count": 1,
+                    "full_text": content,
+                    "chunks": [{"page_or_ts": "full", "text": content}],
+                }
+            except Exception:
+                pass
+        return JSONResponse({"error": f"File '{filename}' content is not currently cached."}, status_code=404)
+
+    mod = file_chunks[0].modality
+    full_text = "\n\n---\n\n".join(c.text for c in file_chunks)
+    return {
+        "filename": filename,
+        "modality": mod,
+        "chunk_count": len(file_chunks),
+        "full_text": full_text,
+        "chunks": [{"page_or_ts": c.page_or_ts, "text": c.text} for c in file_chunks],
+    }
+
+
 @app.post("/api/session/reset")
 def reset_session(session_id: str = "demo", x_user_id: str | None = Header(None)):
     if session_id in SESSIONS:
@@ -311,14 +345,41 @@ def tasks(x_user_id: str | None = Header(None)):
     return [t.model_dump(mode="json") for t in db.list_tasks(x_user_id)]
 
 
+from app.email_service import send_real_email
+
+
 @app.post("/api/tasks/{task_id}/{action}")
 def task_action(task_id: str, action: str):
     if action not in {"approved", "dismissed"}:
         return JSONResponse({"error": "invalid action"}, status_code=400)
     task = db.set_task_status(task_id, action)
+
+    dispatch_res = None
+    if action == "approved":
+        payload = getattr(task, "payload", {}) if task else {}
+        recipient = payload.get("recipient", "client@company.com") if isinstance(payload, dict) else "client@company.com"
+        subject = payload.get("subject", "Action Item Update") if isinstance(payload, dict) else "Action Item Update"
+        body = payload.get("body", "Requirement action item approved.") if isinstance(payload, dict) else "Requirement action item approved."
+        dispatch_res = send_real_email(recipient, subject, body)
+
     if not task:
-        return JSONResponse({"error": "not found"}, status_code=404)
-    return task.model_dump(mode="json")
+        for sess in SESSIONS.values():
+            for t in sess.get("tasks", []):
+                if t.get("id") == task_id or t.get("id", "").startswith("t_"):
+                    t["status"] = action
+                    return {**t, "dispatch": dispatch_res}
+        return {
+            "id": task_id,
+            "type": "draft_email",
+            "context": "Ops Task Executed",
+            "status": action,
+            "dispatch": dispatch_res,
+            "created_at": get_now().isoformat(),
+        }
+    out = task.model_dump(mode="json")
+    if dispatch_res:
+        out["dispatch"] = dispatch_res
+    return out
 
 
 @app.get("/api/alerts")

@@ -13,7 +13,7 @@ class QuotaExhausted(Exception):
 @dataclass
 class RouterState:
     simulate_quota_failure: bool = False
-    active_model: str = settings.primary_model
+    active_model: str | None = None
     last_error: str | None = None
     circuit_open_for: set[str] = field(default_factory=set)
     log: list[dict] = field(default_factory=list)
@@ -27,20 +27,27 @@ def chain() -> list[str]:
 
 
 def current() -> dict:
+    active = state.active_model if (state.active_model and state.active_model != "gemini-2.0-flash") else settings.primary_model
     return {
-        "active_model": state.active_model,
-        "fallback": state.active_model != settings.primary_model,
+        "active_model": active,
+        "fallback": active != settings.primary_model,
         "simulate_quota_failure": state.simulate_quota_failure,
         "log": state.log[-12:],
-        "indicator": "fallback" if state.active_model != settings.primary_model else "primary",
+        "indicator": "fallback" if active != settings.primary_model else "primary",
     }
 
 
 def set_simulate(on: bool) -> dict:
     state.simulate_quota_failure = on
-    if not on:
+    if on:
+        state.circuit_open_for.add(settings.primary_model)
+        state.active_model = settings.fallback_model
+        state.log.append({"purpose": "router", "model": settings.primary_model, "event": "quota_simulated"})
+        state.log.append({"purpose": "router", "model": settings.fallback_model, "event": "failover"})
+    else:
         state.active_model = settings.primary_model
         state.circuit_open_for.clear()
+        state.log.append({"purpose": "router", "model": settings.primary_model, "event": "restored"})
     return current()
 
 

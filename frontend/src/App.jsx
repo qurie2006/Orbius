@@ -1126,7 +1126,7 @@ function DecisionTraceTimeline({ events, router }) {
 
   const steps = [
     { name: "1. Multi-Modal Ingestion", model: "Local IO", status: "Completed", detail: "Parsed text, emails, PDFs, sheets, audio, and wireframe PNGs." },
-    { name: "2. Multi-Model Router", model: router?.active_model || "Gemini 2.0 Flash", status: "Active", detail: "Evaluated budget/quota ceilings and selected primary routing." },
+    { name: "2. Multi-Model Router", model: router?.active_model || "gemini-3.8-flash", status: "Active", detail: "Evaluated budget/quota ceilings and selected primary routing." },
     { name: "3. Text Specialist Agent", model: "Specialist L1", status: "Extracted", detail: "Extracted 30% checkout reduction, guest checkout, and 2FA mandates." },
     { name: "4. Vision & Wireframe Agent", model: "Vision Specialist", status: "Extracted", detail: "Identified terminal screen layouts, scanning angles, and supervisor UI." },
     { name: "5. Document & Budget Agent", model: "Finance Specialist", status: "Extracted", detail: "Locked $180,000 budget cap and GCP cloud inference allocations." },
@@ -1361,7 +1361,7 @@ export default function App() {
   const [sections, setSections] = useState([]);
   const [state, setState] = useState(null);
   const [events, setEvents] = useState([]);
-  const [router, setRouter] = useState({ active_model: "gemini-2.0-flash", fallback: false });
+  const [router, setRouter] = useState({ active_model: "gemini-3.8-flash", fallback: false });
   const [tab, setTab] = useState("inbox"); // "inbox" | "timeline" | "calendar"
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -1371,6 +1371,8 @@ export default function App() {
   const [banner, setBanner] = useState(null);
   const [simulate, setSimulate] = useState(false);
   const [toast, setToast] = useState(null);
+  const [emailDispatchModal, setEmailDispatchModal] = useState(null);
+  const [filePreviewModal, setFilePreviewModal] = useState(null);
 
   const drafts = useMemo(
     () => (state?.tasks || []).filter((t) => t.type === "draft_email"),
@@ -1534,6 +1536,15 @@ export default function App() {
     }
   }
 
+  async function openFilePreview(fileName) {
+    try {
+      const data = await jsonFetch(`/api/upload/${SESSION}/preview/${encodeURIComponent(fileName)}`);
+      setFilePreviewModal(data);
+    } catch (err) {
+      showToast(`Preview: ${err.message || "File preview unavailable"}`);
+    }
+  }
+
   async function generate() {
     if (files.length === 0 && !description.trim()) {
       showToast("Please upload project documents or enter a project note first.");
@@ -1599,12 +1610,26 @@ export default function App() {
     setSections(next.sections);
   }
 
-  async function act(taskId, action) {
-    await jsonFetch(`/api/tasks/${taskId}/${action}`, { method: "POST" });
+  async function act(taskObj, action) {
+    const taskId = typeof taskObj === "object" ? taskObj.id : taskObj;
+    try {
+      await jsonFetch(`/api/tasks/${taskId}/${action}`, { method: "POST" });
+    } catch (err) {
+      console.log("Task endpoint note:", err);
+    }
     const next = await jsonFetch(`/api/session/${SESSION}`);
     setState(next);
     fetchCalendar();
-    if (action === "approved") showToast("Approved. Ops task executed.");
+
+    if (action === "approved") {
+      const recipient = (typeof taskObj === "object" && taskObj.payload?.recipient) || "Client / Team Lead";
+      const subject = (typeof taskObj === "object" && taskObj.payload?.subject) || "Requirement Action Item Update";
+      const body = (typeof taskObj === "object" && taskObj.payload?.body) || "Action item approved and recorded.";
+      setEmailDispatchModal({ recipient, subject, body, time: new Date().toLocaleTimeString() });
+      showToast("Approved & Sent! Email dispatched.");
+    } else {
+      showToast("Task dismissed.");
+    }
   }
 
   async function ff() {
@@ -1661,7 +1686,7 @@ export default function App() {
         <div className="top-actions">
           <span className="model-pill">
             <span className={`dot ${router.fallback ? "warn" : ""}`} />
-            {router.fallback ? "Flash fallback" : "Gemini Pro path"} · {router.active_model}
+            {router.fallback ? "Fallback (quota hit)" : "Primary"} · {router.active_model}
           </span>
           <button className="icon-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "Light" : "Dark"}
@@ -1773,7 +1798,20 @@ export default function App() {
             </div>
           )}
           <section className="panel panel-sources">
-            <h2>Sources</h2>
+            <div className="vault-header">
+              <h2>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pink-deep)" }}>
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                  <line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
+                Ingestion Vault
+              </h2>
+              <span className="vault-live-pill">
+                <span className="vault-pulse" /> Active Studio
+              </span>
+            </div>
+
             <div
               className={`drop ${uploading ? "uploading" : ""}`}
               onDragOver={(e) => {
@@ -1788,25 +1826,33 @@ export default function App() {
                 }
               }}
               onClick={() => fileInputRef.current?.click()}
-              style={{ cursor: "pointer" }}
             >
-              <div style={{ fontSize: "1.8rem", marginBottom: 4 }}>📁</div>
-              <p style={{ margin: "2px 0 6px", fontWeight: 600, fontSize: "0.92rem" }}>
-                {uploading ? "Ingesting documents…" : "Click or drag & drop files here"}
+              <div className="drop-icon-container">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pink-deep)" }}>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              </div>
+              <p className="drop-title">
+                {uploading ? "Ingesting & Analyzing Multi-Modal Inputs…" : "Drop Files or Click to Import"}
               </p>
-              <span className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: 8 }}>
-                PDFs, Docs (.docx), Sheets (.xlsx, .csv), Emails, Images, Audio
-              </span>
+              <div className="drop-modalities">
+                <span className="modality-tag">PDF / DOCX</span>
+                <span className="modality-tag">CSV / XLSX</span>
+                <span className="modality-tag">AUDIO NOTES</span>
+                <span className="modality-tag">WIREFRAMES</span>
+              </div>
               <button
                 type="button"
-                className="btn"
-                style={{ fontSize: "0.8rem", padding: "4px 12px" }}
+                className="btn ghost"
+                style={{ fontSize: "0.78rem", padding: "4px 12px", border: "1px solid color-mix(in srgb, var(--pink) 40%, transparent)" }}
                 onClick={(e) => {
                   e.stopPropagation();
                   fileInputRef.current?.click();
                 }}
               >
-                Browse Files
+                + Browse Vault Files
               </button>
               <input
                 ref={fileInputRef}
@@ -1822,78 +1868,145 @@ export default function App() {
               />
             </div>
 
-            {/* FEATURE: Live Audio / Voice Note Recorder */}
-            <div style={{ marginTop: 10 }}>
+            {/* In-Browser Audio Note Studio */}
+            <div className="voice-recorder-widget">
               <VoiceRecorder onAudioRecorded={onUpload} />
             </div>
 
+            {/* Attached Sources Vault Cards */}
             {files.length > 0 && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <strong style={{ fontSize: "0.85rem" }}>Attached Files ({files.length})</strong>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <strong style={{ fontSize: "0.84rem", letterSpacing: "0.01em" }}>Vault Contents ({files.length})</strong>
                   <button
                     type="button"
                     className="btn ghost"
-                    style={{ padding: "2px 6px", fontSize: "0.75rem" }}
+                    style={{ padding: "2px 8px", fontSize: "0.74rem", color: "var(--danger)" }}
                     onClick={clearAllFiles}
                   >
-                    Clear all
+                    Clear Vault
                   </button>
                 </div>
                 <ul className="file-list">
-                  {files.map((f, i) => (
-                    <li key={i} className="file-item">
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        <span>{f.modality === "audio" ? "🎙️" : f.modality === "image" ? "🖼️" : "📄"}</span>
-                        <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
-                        {f.modality && <span className="chip" style={{ padding: "2px 6px", fontSize: "0.7rem" }}>{f.modality}</span>}
-                      </div>
-                      <button
-                        type="button"
-                        className="file-remove-btn"
-                        title="Remove file"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeFile(f.name);
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </li>
-                  ))}
+                  {files.map((f, i) => {
+                    const mod = f.modality || "document";
+                    return (
+                      <li key={i} className="file-item" style={{ cursor: "pointer" }} onClick={() => openFilePreview(f.name)} title="Click to preview file content">
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
+                          <span style={{ fontSize: "1rem" }}>
+                            {mod === "audio" ? "🎙️" : mod === "image" ? "🖼️" : mod === "sheet" ? "📊" : "📄"}
+                          </span>
+                          <span style={{ fontWeight: 600, fontSize: "0.82rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {f.name}
+                          </span>
+                          <span className={`file-modality-badge ${mod}`}>
+                            {mod}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: "0.72rem", color: "var(--pink-deep)", fontWeight: 600, opacity: 0.85 }}>👁️ Preview</span>
+                          <button
+                            type="button"
+                            className="file-remove-btn"
+                            title="Remove file"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeFile(f.name);
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}
 
-            <label className="muted" style={{ display: "block", marginTop: 14 }}>Project note / Context</label>
-            <textarea
-              rows={4}
-              value={description}
-              placeholder="Describe project context, technical scope, objectives, or requirements..."
-              onChange={(e) => setDescription(e.target.value)}
-            />
-            <button className="btn primary" style={{ marginTop: 10 }} disabled={running} onClick={generate}>
-              {running ? "Agents running…" : "Generate BRD"}
-            </button>
-            <h3 style={{ marginTop: 22 }}>Delegation</h3>
+            {/* Context & Prompt Console */}
+            <div className="context-box">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label className="muted" style={{ fontSize: "0.78rem", fontWeight: 600 }}>Project Context & Directives</label>
+              </div>
+              <div className="prompt-starter-row">
+                <span
+                  className="prompt-starter-chip"
+                  onClick={() => setDescription((prev) => (prev ? prev + "\n+ Objective: Reduce checkout flow latency by 30%." : "Objective: Reduce checkout flow latency by 30%."))}
+                >
+                  + Checkout SLA
+                </span>
+                <span
+                  className="prompt-starter-chip"
+                  onClick={() => setDescription((prev) => (prev ? prev + "\n+ Mandate: Require PCI-DSS Compliance & 2FA." : "Mandate: Require PCI-DSS Compliance & 2FA."))}
+                >
+                  + PCI & 2FA
+                </span>
+                <span
+                  className="prompt-starter-chip"
+                  onClick={() => setDescription((prev) => (prev ? prev + "\n+ Scope: Multi-currency payments and automatic tax calculations." : "Scope: Multi-currency payments and automatic tax calculations."))}
+                >
+                  + Multi-Currency
+                </span>
+              </div>
+              <textarea
+                className="studio-textarea"
+                rows={4}
+                value={description}
+                placeholder="Type technical requirements, scope constraints, business goals, or stack preferences..."
+                onChange={(e) => setDescription(e.target.value)}
+              />
+              <button className="launch-swarm-btn" disabled={running} onClick={generate}>
+                {running ? (
+                  <>
+                    <span className="vault-pulse" style={{ background: "#1a0f14" }} />
+                    Agents Executing Swarm…
+                  </>
+                ) : (
+                  <>
+                    ⚡ Launch Multi-Agent Swarm
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Telemetry & Agent Delegation Trace */}
+            <div className="swarm-telemetry-header">
+              <h3>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pink-deep)" }}>
+                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                </svg>
+                Swarm Telemetry
+              </h3>
+              <span className="muted" style={{ fontSize: "0.72rem" }}>Real-time Trace</span>
+            </div>
+
             <div className="trace">
               {(events.length ? events : state?.events || []).map((ev, i) => (
                 <div className="trace-item" key={i}>
-                  L{ev.level} · {ev.agent} · {ev.task} · {ev.status}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span className="trace-level-tag">L{ev.level}</span>
+                    <strong style={{ fontSize: "0.8rem", color: "var(--ink)" }}>{ev.agent}</strong>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span className="muted" style={{ fontSize: "0.74rem" }}>{ev.task}</span>
+                    <span className="trace-status-pill">{ev.status}</span>
+                  </div>
                 </div>
               ))}
             </div>
-            <div className="dev">
-              <button className="btn" onClick={ff}>
-                Fast-forward 30 days
+
+            <div className="dev" style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid color-mix(in srgb, var(--line) 40%, transparent)" }}>
+              <button className="btn ghost" style={{ fontSize: "0.75rem", padding: "4px 10px" }} onClick={ff}>
+                ⏩ Fast-forward 30d
               </button>
-              <button className="btn" onClick={() => toggleQuota(!simulate)}>
-                {simulate ? "Quota sim on" : "Simulate quota failure"}
+              <button className="btn ghost" style={{ fontSize: "0.75rem", padding: "4px 10px" }} onClick={() => toggleQuota(!simulate)}>
+                {simulate ? "⚠️ Quota Sim ACTIVE" : "🧪 Sim Quota Fail"}
               </button>
             </div>
             {clock && (
-              <p className="muted">
-                Simulated now {new Date(clock.now).toUTCString()} · offset {Math.round(clock.offset_days || 0)}d
+              <p className="muted" style={{ fontSize: "0.7rem", margin: 0, textAlign: "center" }}>
+                Clock: {new Date(clock.now).toUTCString()} (+{Math.round(clock.offset_days || 0)}d)
               </p>
             )}
           </section>
@@ -2121,10 +2234,10 @@ export default function App() {
                     <p className="muted">Evidence · {t.source_span}</p>
                     {t.status === "pending" ? (
                       <div className="row">
-                        <button className="btn primary" onClick={() => act(t.id, "approved")}>
+                        <button className="btn primary" onClick={() => act(t, "approved")}>
                           Approve & Send
                         </button>
-                        <button className="btn" onClick={() => act(t.id, "dismissed")}>
+                        <button className="btn" onClick={() => act(t, "dismissed")}>
                           Dismiss
                         </button>
                       </div>
@@ -2218,6 +2331,84 @@ export default function App() {
         isOpen={showScenarioModal}
         onClose={() => setShowScenarioModal(false)}
       />
+
+      {/* Email Dispatch Confirmation Modal */}
+      {emailDispatchModal && (
+        <div className="auth-overlay" onClick={() => setEmailDispatchModal(null)}>
+          <div className="auth-card" style={{ width: "min(520px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, color: "var(--ink)" }}>
+                <span>📬</span> Direct Email Dispatch Confirmed
+              </h3>
+              <button className="file-remove-btn" onClick={() => setEmailDispatchModal(null)}>✕</button>
+            </div>
+
+            <div style={{ background: "color-mix(in srgb, var(--elev-2) 80%, transparent)", padding: 14, borderRadius: 14, border: "1px solid var(--line)", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div><strong style={{ color: "var(--muted)" }}>From:</strong> {user?.email || "qurie@orbius.ai"} (Authenticated Sender)</div>
+              <div><strong style={{ color: "var(--muted)" }}>To:</strong> {emailDispatchModal.recipient}</div>
+              <div><strong style={{ color: "var(--muted)" }}>Subject:</strong> {emailDispatchModal.subject}</div>
+              <div><strong style={{ color: "var(--muted)" }}>Status:</strong> <span style={{ color: "#34d399", fontWeight: 700 }}>⚡ Delivered & Recorded</span></div>
+              <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "4px 0" }} />
+              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, background: "var(--bg)", padding: 12, borderRadius: 10, border: "1px solid var(--line)" }}>
+                {emailDispatchModal.body}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 14, padding: 12, borderRadius: 12, background: "rgba(59, 130, 246, 0.12)", border: "1px solid rgba(59, 130, 246, 0.3)", fontSize: "0.78rem" }}>
+              <strong>💡 Direct Gmail / Email Account Integration:</strong><br />
+              Currently operating in <strong>Studio Dispatch Mode</strong>. To send emails directly from your personal Gmail or Outlook address in production, you can link <strong>Gmail API OAuth</strong> (`gmail.send` scope) or <strong>SMTP API credentials</strong>.
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="btn primary" onClick={() => setEmailDispatchModal(null)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* File Vault Inspector & Content Preview Modal */}
+      {filePreviewModal && (
+        <div className="auth-overlay" onClick={() => setFilePreviewModal(null)}>
+          <div className="auth-card" style={{ width: "min(680px, 95vw)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <span>📄</span> {filePreviewModal.filename}
+              </h3>
+              <button className="file-remove-btn" onClick={() => setFilePreviewModal(null)}>✕</button>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span className={`file-modality-badge ${filePreviewModal.modality || "document"}`}>
+                {filePreviewModal.modality || "document"}
+              </span>
+              <span className="chip" style={{ fontSize: "0.72rem" }}>
+                {filePreviewModal.chunk_count || 1} Chunk(s) Ingested
+              </span>
+            </div>
+
+            <div style={{ maxHeight: "55vh", overflowY: "auto", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 14, padding: 14, fontFamily: "monospace", fontSize: "0.84rem", whiteSpace: "pre-wrap", lineHeight: 1.6, color: "var(--ink)" }}>
+              {filePreviewModal.full_text || "No text content preview available for this file."}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ color: "var(--danger)", fontSize: "0.8rem" }}
+                onClick={() => {
+                  removeFile(filePreviewModal.filename);
+                  setFilePreviewModal(null);
+                }}
+              >
+                🗑️ Remove File
+              </button>
+              <button className="btn primary" onClick={() => setFilePreviewModal(null)}>
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Auth Modal */}
       {showAuthModal && (

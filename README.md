@@ -1,4 +1,4 @@
-# 🌌 Orbius — Multi-Agent BRD & Living Requirements Studio
+# 🌌 Orbius - Multi-Agent BRD & Living Requirements Studio
 
 > **Scattered inputs. A living BRD. Follow-ups that do not vanish.**  
 > Built for the Google Cloud & Gemini AI Hackathon.

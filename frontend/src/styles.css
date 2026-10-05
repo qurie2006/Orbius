@@ -1900,3 +1900,184 @@ html[data-theme="dark"] .card {
   border-radius: 14px;
   padding: 14px;
 }
+
+/* ====================================================
+   MOBILE & TABLET RESPONSIVENESS
+   ==================================================== */
+html, body {
+  overflow-x: hidden;
+}
+
+img, svg, canvas, video {
+  max-width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .copilot-drawer {
+    top: auto;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
+    max-width: none;
+    height: min(78vh, 640px);
+  }
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .brand {
+    gap: 10px;
+  }
+
+  .brand b {
+    font-size: 1.25rem;
+  }
+
+  .brand span {
+    font-size: 0.7rem;
+  }
+
+  .brand-logo-img {
+    max-height: 36px;
+    width: auto;
+  }
+
+  .top-actions,
+  .top-nav-group {
+    flex-wrap: wrap;
+    gap: 6px !important;
+    width: 100%;
+  }
+
+  .top-actions .btn,
+  .top-actions .icon-btn {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+  }
+
+  .model-pill {
+    display: none;
+  }
+
+  .landing {
+    padding: 28px 16px 56px;
+  }
+
+  .hero {
+    gap: 24px;
+  }
+
+  .hero h1 {
+    font-size: clamp(2rem, 9vw, 2.6rem);
+  }
+
+  .lede {
+    font-size: 1rem;
+  }
+
+  .hero-card {
+    border-radius: 22px;
+    padding: 18px;
+  }
+
+  .workspace {
+    padding: 10px 10px 24px;
+    gap: 12px;
+  }
+
+  .panel,
+  .panel-sources {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .split,
+  .scenario-presets,
+  .prototype-screen {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mermaid-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .diagram-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mermaid-viewport {
+    overflow-x: auto;
+  }
+
+  .auth-overlay {
+    padding: 12px;
+    align-items: flex-end;
+  }
+
+  .auth-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 18px;
+    border-radius: 20px;
+  }
+
+  .calendar-widget {
+    overflow-x: auto;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  pre, code {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Bigger touch targets */
+  .btn,
+  .icon-btn,
+  .tab-btn {
+    min-height: 36px;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px; /* prevents iOS zoom on focus */
+  }
+}
+
+@media (max-width: 420px) {
+  .brand span {
+    display: none;
+  }
+
+  .top-actions .btn,
+  .top-actions .icon-btn {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .chip-row {
+    gap: 6px;
+  }
+}

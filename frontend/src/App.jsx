@@ -1719,7 +1719,7 @@ export default function App() {
               Open workspace
             </button>
           ) : (
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="top-nav-group" style={{ display: "flex", gap: 8 }}>
               <button
                 type="button"
                 className="btn ghost"

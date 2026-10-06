@@ -346,6 +346,8 @@ html[data-theme="dark"] .btn.primary {
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .drop:hover {
@@ -692,6 +694,9 @@ textarea.studio-textarea:focus {
 }
 
 .brd-line {
+  word-wrap: break-word;
+  word-break: break-word;
+  white-space: normal;
   padding: 10px 14px;
   border-radius: 12px;
   cursor: pointer;

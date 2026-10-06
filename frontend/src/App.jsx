@@ -293,7 +293,7 @@ function VoiceRecorder({ onAudioRecorded }) {
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-      } catch (e) {}
+      } catch (e) { }
     }
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
@@ -1381,8 +1381,8 @@ export default function App() {
   const alerts = state?.alerts || [];
 
   useEffect(() => {
-    jsonFetch("/api/clock").then(setClock).catch(() => {});
-    jsonFetch("/api/router").then(setRouter).catch(() => {});
+    jsonFetch("/api/clock").then(setClock).catch(() => { });
+    jsonFetch("/api/router").then(setRouter).catch(() => { });
     fetchCalendar();
     fetchUserSession();
   }, [user]);
@@ -1414,7 +1414,7 @@ export default function App() {
           setFiles(unique);
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   async function resetWorkspace() {
@@ -1677,7 +1677,7 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand" onClick={goToHome} style={{ cursor: "pointer" }}>
-          <img src="/orbius-orb.png" alt="Orbius" className="brand-logo-img" />
+          <img src="/orbius-logo.png" alt="Orbius" className="brand-logo-img" />
           <div>
             <b>Orbius</b>
             <span>Multi-agent BRD studio</span>
@@ -1719,7 +1719,7 @@ export default function App() {
               Open workspace
             </button>
           ) : (
-            <div className="top-nav-group" style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8 }}>
               <button
                 type="button"
                 className="btn ghost"
@@ -2065,7 +2065,7 @@ export default function App() {
             ) : studioCenterTab === "ripple" ? (
               <ImpactRippleGraph sessionId={SESSION} />
             ) : studioCenterTab === "meeting" ? (
-              <LiveMeetingMode onNewFinding={() => {}} />
+              <LiveMeetingMode onNewFinding={() => { }} />
             ) : studioCenterTab === "trace" ? (
               <DecisionTraceTimeline events={state?.events || events} router={router} />
             ) : (

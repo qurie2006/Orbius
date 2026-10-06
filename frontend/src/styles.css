@@ -62,6 +62,7 @@ body,
 #root {
   margin: 0;
   min-height: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -237,6 +238,9 @@ html[data-theme="dark"] .btn.primary {
   grid-template-columns: 300px minmax(0, 1fr) 340px;
   gap: 16px;
   padding: 16px 20px 28px;
+  max-width: 100%;
+  overflow-x: hidden;
+  word-wrap: break-word;
 }
 
 .panel {
@@ -248,6 +252,8 @@ html[data-theme="dark"] .btn.primary {
   padding: 24px;
   min-height: calc(100vh - 110px);
   box-shadow: 0 8px 32px color-mix(in srgb, var(--ink) 4%, transparent);
+  overflow-x: hidden;
+  word-wrap: break-word;
 }
 
 .panel h2 {
@@ -284,9 +290,17 @@ html[data-theme="dark"] .btn.primary {
 }
 
 @keyframes borderGlow {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
 }
 
 .vault-header {
@@ -332,8 +346,17 @@ html[data-theme="dark"] .btn.primary {
 }
 
 @keyframes pulseGlow {
-  0%, 100% { opacity: 0.5; transform: scale(0.9); }
-  50% { opacity: 1; transform: scale(1.2); }
+
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
 }
 
 /* Multi-Modal Ingestion Dropzone */
@@ -346,8 +369,6 @@ html[data-theme="dark"] .btn.primary {
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   cursor: pointer;
-  width: 100%;
-  box-sizing: border-box;
 }
 
 .drop:hover {
@@ -694,9 +715,6 @@ textarea.studio-textarea:focus {
 }
 
 .brd-line {
-  word-wrap: break-word;
-  word-break: break-word;
-  white-space: normal;
   padding: 10px 14px;
   border-radius: 12px;
   cursor: pointer;
@@ -830,6 +848,9 @@ html[data-theme="dark"] .card {
 .section-body {
   white-space: pre-wrap;
   line-height: 1.55;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
 }
 
 .row {
@@ -932,6 +953,8 @@ html[data-theme="dark"] .card {
   border-radius: 28px;
   padding: 32px;
   box-shadow: var(--shadow);
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .auth-tabs {
@@ -1580,6 +1603,7 @@ html[data-theme="dark"] .card {
   width: 95%;
   max-height: 85vh;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .scenario-presets {
@@ -1909,11 +1933,15 @@ html[data-theme="dark"] .card {
 /* ====================================================
    MOBILE & TABLET RESPONSIVENESS
    ==================================================== */
-html, body {
-  
+html,
+body {
+  overflow-x: hidden;
 }
 
-img, svg, canvas, video {
+img,
+svg,
+canvas,
+video {
   max-width: 100%;
 }
 
@@ -1956,17 +1984,14 @@ img, svg, canvas, video {
   .top-actions,
   .top-nav-group {
     flex-wrap: wrap;
-    justify-content: flex-start;
-    gap: 8px !important;
+    gap: 6px !important;
     width: 100%;
   }
 
   .top-actions .btn,
   .top-actions .icon-btn {
-    padding: 8px 14px;
-    font-size: 0.85rem;
-    flex: 1 1 auto;
-    text-align: center;
+    padding: 6px 12px;
+    font-size: 0.8rem;
   }
 
   .model-pill {
@@ -1995,15 +2020,18 @@ img, svg, canvas, video {
   }
 
   .workspace {
-    grid-template-columns: 1fr;
     padding: 10px 10px 24px;
     gap: 12px;
+    overflow-x: hidden;
   }
 
   .panel,
   .panel-sources {
     padding: 16px;
     border-radius: 18px;
+    overflow-x: hidden;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   }
 
   .split,
@@ -2056,7 +2084,8 @@ img, svg, canvas, video {
     max-width: 100%;
   }
 
-  pre, code {
+  pre,
+  code {
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -2071,7 +2100,8 @@ img, svg, canvas, video {
   input,
   textarea,
   select {
-    font-size: 16px; /* prevents iOS zoom on focus */
+    font-size: 16px;
+    /* prevents iOS zoom on focus */
   }
 }
 
@@ -2080,11 +2110,13 @@ img, svg, canvas, video {
     display: none;
   }
 
-  .chip-row {
-    gap: 6px;
+  .top-actions .btn,
+  .top-actions .icon-btn {
+    flex: 1 1 auto;
+    text-align: center;
   }
 
-  .drop {
-    padding: 16px 10px;
+  .chip-row {
+    gap: 6px;
   }
 }

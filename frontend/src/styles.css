@@ -1910,7 +1910,7 @@ html[data-theme="dark"] .card {
    MOBILE & TABLET RESPONSIVENESS
    ==================================================== */
 html, body {
-  overflow-x: hidden;
+  
 }
 
 img, svg, canvas, video {

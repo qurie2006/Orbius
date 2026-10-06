@@ -1995,6 +1995,7 @@ img, svg, canvas, video {
   }
 
   .workspace {
+    grid-template-columns: 1fr;
     padding: 10px 10px 24px;
     gap: 12px;
   }

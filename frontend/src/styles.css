@@ -1951,14 +1951,17 @@ img, svg, canvas, video {
   .top-actions,
   .top-nav-group {
     flex-wrap: wrap;
-    gap: 6px !important;
+    justify-content: flex-start;
+    gap: 8px !important;
     width: 100%;
   }
 
   .top-actions .btn,
   .top-actions .icon-btn {
-    padding: 6px 12px;
-    font-size: 0.8rem;
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    flex: 1 1 auto;
+    text-align: center;
   }
 
   .model-pill {
@@ -2071,13 +2074,11 @@ img, svg, canvas, video {
     display: none;
   }
 
-  .top-actions .btn,
-  .top-actions .icon-btn {
-    flex: 1 1 auto;
-    text-align: center;
-  }
-
   .chip-row {
     gap: 6px;
+  }
+
+  .drop {
+    padding: 16px 10px;
   }
 }

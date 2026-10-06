@@ -1677,7 +1677,7 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand" onClick={goToHome} style={{ cursor: "pointer" }}>
-          <img src="/orbius-logo.png" alt="Orbius" className="brand-logo-img" />
+          <img src="/orbius-orb.png" alt="Orbius" className="brand-logo-img" />
           <div>
             <b>Orbius</b>
             <span>Multi-agent BRD studio</span>

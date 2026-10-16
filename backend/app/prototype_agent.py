@@ -5,186 +5,237 @@ Turns extracted BRD findings into:
 2. Structured Gherkin Feature/Scenario Acceptance Test Suites.
 3. Impact Dependency Graph nodes & edges for ripple visualization.
 4. Accuracy Scorecard benchmark metrics.
+
+IMPORTANT: Everything generated here is derived strictly from the findings
+extracted from the user's uploaded files. No demo/training data is injected.
 """
 
 from __future__ import annotations
+
+import re
 from typing import Any
-from app.schemas import Finding, BrdSection, Task
+
+from app.schemas import Finding, Task
+
+MONEY_RE = re.compile(r"\$\s?([\d,]+(?:\.\d+)?)\s*(k|m)?\b", re.IGNORECASE)
+THRESHOLD_RE = re.compile(
+    r"(?:above|over|exceeding|greater than|more than)\s*\$\s?([\d,]+(?:\.\d+)?)\s*(k|m)?", re.IGNORECASE
+)
+DEADLINE_RE = re.compile(
+    r"\b(today|tomorrow|tonight|deadline|due|before|by end of|eod|asap|\d{1,2}(?::\d{2})?\s*(?:am|pm)|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|q[1-4]|"
+    r"january|february|march|april|may|june|july|august|september|october|november|december)\b",
+    re.IGNORECASE,
+)
+BUDGET_WORDS = ("budget", "ceiling", "cap", "limit", "maximum", "cost", "spend", "funding")
 
 
+def _to_number(raw: str, suffix: str | None) -> float:
+    value = float(raw.replace(",", ""))
+    if suffix:
+        value *= 1_000 if suffix.lower() == "k" else 1_000_000
+    return value
+
+
+def parse_money(text: str) -> list[float]:
+    return [_to_number(m.group(1), m.group(2)) for m in MONEY_RE.finditer(text)]
+
+
+def _fmt_money(value: float) -> str:
+    return f"${value:,.0f}"
+
+
+def _short(text: str, words: int = 7) -> str:
+    parts = re.sub(r"\s+", " ", text).strip().rstrip(".").split(" ")
+    return " ".join(parts[:words]) + ("…" if len(parts) > words else "")
+
+
+def _source_file(source_id: str) -> str:
+    # source ids look like "<file-stem>_<hex>#p3"
+    base = source_id.split("#", 1)[0]
+    return base.rsplit("_", 1)[0] if "_" in base else base
+
+
+def _is_budget(f: Finding) -> bool:
+    low = f.statement.lower()
+    return bool(parse_money(f.statement)) and (f.section == "budget" or any(w in low for w in BUDGET_WORDS)) and not THRESHOLD_RE.search(f.statement)
+
+
+def _is_deadline(f: Finding) -> bool:
+    return bool(DEADLINE_RE.search(f.statement)) and f.type != "stakeholder"
+
+
+def _person_name(f: Finding) -> str:
+    return re.split(r"\s+—\s+|\s+\(", f.statement, maxsplit=1)[0].strip()
+
+
+# ---------------------------------------------------------------------------
+# Gherkin test suite
+# ---------------------------------------------------------------------------
 def generate_gherkin_test_suite(findings: list[Finding]) -> list[dict[str, Any]]:
-    """Generates structured, executable Gherkin acceptance test scenarios linked to findings."""
-    scenarios = []
+    """Generates Gherkin acceptance scenarios, one per real finding from uploaded files."""
+    scenarios: list[dict[str, Any]] = []
+    testable = [f for f in findings if f.type != "stakeholder"]
 
-    for idx, f in enumerate(findings):
-        low = f.statement.lower()
-        sec = f.section
+    for idx, f in enumerate(testable, start=1):
+        stmt = f.statement.strip().rstrip(".")
+        src = _source_file(f.source_id)
+        threshold = THRESHOLD_RE.search(stmt)
 
-        if "2fa" in low or "override" in low:
-            scenarios.append({
-                "id": f"TEST-00{idx+1}",
-                "feature": "Supervisor 2FA & Security Overrides",
-                "name": "Store manager 2FA authentication validation",
-                "finding_id": f.id,
-                "requirement_statement": f.statement,
-                "gherkin": f"""Feature: Store Manager Elevated Access
-  Scenario: Supervisor overrides price or age-restricted item
-    Given the kiosk terminal is in 'active transaction' mode
-    When the supervisor attempts an override action for an age-restricted item
-    Then the kiosk must display a 2FA biometric or mobile PIN challenge
-    And upon valid 2FA entry, the override must be approved with an immutable audit log
-    But upon 3 invalid 2FA attempts, the terminal must lock and alert store security""",
-                "status": "passed",
-                "execution_ms": 142,
-                "coverage": "100%"
-            })
-        elif "guest" in low or "checkout" in low:
-            scenarios.append({
-                "id": f"TEST-00{idx+1}",
-                "feature": "Guest Checkout & Order Flow",
-                "name": "Guest shopper end-to-end checkout completion",
-                "finding_id": f.id,
-                "requirement_statement": f.statement,
-                "gherkin": f"""Feature: Guest Self-Service Checkout
-  Scenario: Shopper scans items and pays without creating an account
-    Given an unauthenticated customer approaches an idle kiosk
-    When the customer scans 3 physical merchandise barcodes
-    Then each item must reflect in the active cart with real-time tax calculation
-    When the customer clicks 'Pay as Guest' and completes payment via NFC/card
-    Then an e-receipt option must be presented and the cart cleared within 3 seconds""",
-                "status": "passed",
-                "execution_ms": 89,
-                "coverage": "100%"
-            })
-        elif "offline" in low or "queue" in low or "buffer" in low:
-            scenarios.append({
-                "id": f"TEST-00{idx+1}",
-                "feature": "Offline Resilience & Data Buffer",
-                "name": "Offline queue capacity and auto-sync after network loss",
-                "finding_id": f.id,
-                "requirement_statement": f.statement,
-                "gherkin": f"""Feature: Local Offline Transaction Buffer
-  Scenario: In-store network outage during active checkout session
-    Given the terminal loses internet connectivity to the GCP cloud backend
-    When up to 50 consecutive shoppers complete guest transactions
-    Then each transaction must be encrypted in AES-256 local storage without data loss
-    When internet connectivity is restored
-    Then the offline queue must sync all 50 transactions to the server within 5 seconds""",
-                "status": "passed",
-                "execution_ms": 210,
-                "coverage": "98%"
-            })
-        elif "wcag" in low or "accessibility" in low:
-            scenarios.append({
-                "id": f"TEST-00{idx+1}",
-                "feature": "WCAG 2.2 AA Accessibility",
-                "name": "Contrast, font scaling and auditory accessibility validation",
-                "finding_id": f.id,
-                "requirement_statement": f.statement,
-                "gherkin": f"""Feature: Kiosk Accessibility Standards
-  Scenario: High contrast and auditory screen-reader mode
-    Given a user activates 'Accessibility Mode' on the touch terminal
-    Then all UI elements must maintain a minimum contrast ratio of 4.5:1
-    And tactile audio cues must announce each scanned item price and total""",
-                "status": "passed",
-                "execution_ms": 64,
-                "coverage": "100%"
-            })
-        elif "budget" in sec or "180" in low or "cost" in low:
-            scenarios.append({
-                "id": f"TEST-00{idx+1}",
-                "feature": "Financial Governance & Cost Guardrails",
-                "name": "Budget ceiling limit enforcement",
-                "finding_id": f.id,
-                "requirement_statement": f.statement,
-                "gherkin": f"""Feature: Cloud & Hardware Budget Ceiling
-  Scenario: Monitoring project cost allocations against ceiling
-    Given the total allocated expenditure across engineering, cloud and hardware
-    When all budget line items are aggregated
-    Then the total must not exceed $180,000 USD
-    And any scope expansion exceeding the ceiling must trigger a formal variance alert""",
-                "status": "passed",
-                "execution_ms": 45,
-                "coverage": "100%"
-            })
+        if threshold:
+            limit = _to_number(threshold.group(1), threshold.group(2))
+            action = re.split(THRESHOLD_RE, stmt)[0].strip().rstrip(",") or stmt
+            feature = "Threshold Rule"
+            gherkin = f"""Feature: {_short(stmt, 8)}
+  Scenario: Amount is above the {_fmt_money(limit)} threshold
+    Given the rule from "{src}" is active
+    When a transaction of {_fmt_money(limit + 1)} is submitted
+    Then {action[0].lower() + action[1:] if action else stmt}
+
+  Scenario: Amount is at or below the {_fmt_money(limit)} threshold
+    Given the rule from "{src}" is active
+    When a transaction of {_fmt_money(limit)} is submitted
+    Then the extra check is not required"""
+        elif _is_budget(f):
+            cap = max(parse_money(stmt))
+            feature = "Budget Limit"
+            gherkin = f"""Feature: {_short(stmt, 8)}
+  Scenario: Total spend stays within {_fmt_money(cap)}
+    Given the budget limit from "{src}" is {_fmt_money(cap)}
+    When all planned costs are added together
+    Then the total must not exceed {_fmt_money(cap)}
+    And any spend above {_fmt_money(cap)} must be flagged for approval"""
+        elif _is_deadline(f):
+            feature = "Deadline / Action Item"
+            gherkin = f"""Feature: {_short(stmt, 8)}
+  Scenario: Action is completed on time
+    Given the action item from "{src}": "{stmt}"
+    When the stated deadline is reached
+    Then the action must be marked as done
+    But if it is not done, an overdue reminder must be raised"""
         else:
-            scenarios.append({
-                "id": f"TEST-00{idx+1}",
-                "feature": f"{f.section.replace('_', ' ').title()} Validation",
-                "name": f"Validation for: {f.statement[:40]}...",
-                "finding_id": f.id,
-                "requirement_statement": f.statement,
-                "gherkin": f"""Feature: {f.type.title()} Verification
-  Scenario: Validate compliance for {f.statement[:35]}
-    Given the project specification baseline
-    When the system evaluates requirement '{f.id}'
-    Then the condition '{f.statement}' must be satisfied with confidence >= 0.75
-    And evidence must trace to source '{f.source_id}'""",
-                "status": "passed",
-                "execution_ms": 50,
-                "coverage": "95%"
-            })
+            feature = f"{f.section.replace('_', ' ').title()}"
+            gherkin = f"""Feature: {_short(stmt, 8)}
+  Scenario: Requirement is satisfied
+    Given the requirement from "{src}"
+    When the delivered solution is reviewed
+    Then it must be true that: "{stmt}"
+    And the evidence must trace back to "{src}\""""
 
-    return scenarios[:12]
+        scenarios.append({
+            "id": f"TEST-{idx:03d}",
+            "feature": feature,
+            "name": _short(stmt, 10),
+            "finding_id": f.id,
+            "requirement_statement": f.statement,
+            "gherkin": gherkin,
+            "status": "ready",
+            "execution_ms": None,
+            "coverage": "1 scenario" if not threshold else "2 scenarios",
+        })
+
+    return scenarios[:20]
 
 
+# ---------------------------------------------------------------------------
+# Impact ripple graph
+# ---------------------------------------------------------------------------
 def generate_ripple_graph(findings: list[Finding], tasks: list[Task]) -> dict[str, Any]:
-    """Builds an interactive dependency graph with Requirements, Stakeholders, Budgets, and Deadlines."""
-    nodes = [
-        {"id": "node_project", "label": "Kiosk Modernization", "type": "project", "color": "#818cf8"},
-        {"id": "node_priya", "label": "Priya Mehta (Product)", "type": "stakeholder", "color": "#38bdf8"},
-        {"id": "node_marcus", "label": "Marcus Chen (Finance)", "type": "stakeholder", "color": "#38bdf8"},
-        {"id": "node_elena", "label": "Elena Rostova (Arch)", "type": "stakeholder", "color": "#38bdf8"},
-        {"id": "node_david", "label": "David Kim (Ops)", "type": "stakeholder", "color": "#38bdf8"},
-        {"id": "node_budget", "label": "$180k Budget Cap", "type": "budget", "color": "#fbbf24"},
-        {"id": "node_q3", "label": "Q3 Launch Target", "type": "deadline", "color": "#f87171"},
-        {"id": "node_2fa", "label": "Manager 2FA Override", "type": "requirement", "color": "#34d399"},
-        {"id": "node_guest", "label": "Guest Checkout", "type": "requirement", "color": "#34d399"},
-        {"id": "node_offline", "label": "50-Basket Offline Queue", "type": "requirement", "color": "#34d399"},
-        {"id": "node_wcag", "label": "WCAG 2.2 AA", "type": "requirement", "color": "#34d399"},
-        {"id": "node_ai", "label": "Vertex AI Engine", "type": "infrastructure", "color": "#c084fc"},
+    """Builds a dependency graph strictly from the uploaded files' findings and tasks."""
+    if not findings and not tasks:
+        return {"nodes": [], "edges": [], "simulations": []}
+
+    nodes: list[dict[str, Any]] = [
+        {"id": "node_project", "label": "Your Project", "type": "project", "color": "#818cf8"}
     ]
+    edges: list[dict[str, str]] = []
+    by_file: dict[str, list[str]] = {}
+    stakeholder_nodes: list[tuple[str, str]] = []  # (node_id, file)
+    budget_nodes, deadline_nodes, req_nodes, task_nodes = [], [], [], []
 
-    edges = [
-        {"source": "node_project", "target": "node_priya", "relation": "owned by"},
-        {"source": "node_priya", "target": "node_guest", "relation": "mandates"},
-        {"source": "node_priya", "target": "node_q3", "relation": "targets"},
-        {"source": "node_marcus", "target": "node_budget", "relation": "enforces"},
-        {"source": "node_budget", "target": "node_ai", "relation": "funds ($40k)"},
-        {"source": "node_elena", "target": "node_2fa", "relation": "architects"},
-        {"source": "node_elena", "target": "node_offline", "relation": "specifies"},
-        {"source": "node_elena", "target": "node_wcag", "relation": "mandates"},
-        {"source": "node_david", "target": "node_q3", "relation": "conflicts with (Oct staffing)"},
-        {"source": "node_david", "target": "node_2fa", "relation": "executes on tablet"},
-        {"source": "node_offline", "target": "node_ai", "relation": "syncs to"},
-    ]
+    for i, f in enumerate(findings):
+        nid = f"node_f{i}"
+        src = _source_file(f.source_id)
+        if f.type == "stakeholder" or f.section == "stakeholders":
+            nodes.append({"id": nid, "label": _person_name(f), "type": "stakeholder", "color": "#38bdf8"})
+            stakeholder_nodes.append((nid, src))
+            edges.append({"source": "node_project", "target": nid, "relation": "involves"})
+            continue
+        if _is_budget(f):
+            cap = max(parse_money(f.statement))
+            nodes.append({"id": nid, "label": f"{_fmt_money(cap)} budget limit", "type": "budget", "color": "#fbbf24", "statement": f.statement})
+            budget_nodes.append((nid, f, cap))
+        elif _is_deadline(f):
+            nodes.append({"id": nid, "label": _short(f.statement, 6), "type": "deadline", "color": "#f87171", "statement": f.statement})
+            deadline_nodes.append((nid, f))
+        else:
+            nodes.append({"id": nid, "label": _short(f.statement, 6), "type": "requirement", "color": "#34d399", "statement": f.statement})
+            req_nodes.append((nid, f))
+        edges.append({"source": "node_project", "target": nid, "relation": "includes"})
+        by_file.setdefault(src, []).append(nid)
 
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "simulations": [
-            {
-                "id": "sim_delay_api",
-                "title": "Delay Cloud API by 2 Weeks",
-                "affected_nodes": ["node_ai", "node_offline", "node_q3", "node_budget"],
-                "impact_summary": "Affects 2 architectural requirements, risks Q3 deadline slippage, and adds $12,500 contractor cost."
-            },
-            {
-                "id": "sim_cut_budget",
-                "title": "Reduce Budget by $30,000",
-                "affected_nodes": ["node_budget", "node_ai", "node_wcag"],
-                "impact_summary": "Reduces Vertex AI inference budget and deprioritizes auditory WCAG screen-reader support."
-            },
-            {
-                "id": "sim_add_biometric",
-                "title": "Enforce Hardware Biometric 2FA",
-                "affected_nodes": ["node_2fa", "node_budget", "node_david", "node_elena"],
-                "impact_summary": "Requires $15,000 hardware reader procurement; extends store manager training timeline."
-            }
-        ]
-    }
+    for j, t in enumerate(tasks):
+        nid = f"node_t{j}"
+        nodes.append({"id": nid, "label": _short(t.context or "Action item", 6), "type": "task", "color": "#c084fc"})
+        task_nodes.append(nid)
+        edges.append({"source": "node_project", "target": nid, "relation": "requires action"})
+
+    # Stakeholders are linked to the items found in the same file they sent/wrote
+    for sid, src in stakeholder_nodes:
+        for target in by_file.get(src, []):
+            edges.append({"source": sid, "target": target, "relation": "requested"})
+
+    def linked_people(node_ids: list[str]) -> list[str]:
+        ids = set(node_ids)
+        return [e["source"] for e in edges if e["target"] in ids and e["source"] != "node_project"]
+
+    simulations: list[dict[str, Any]] = []
+
+    if budget_nodes:
+        nid, f, cap = budget_nodes[0]
+        new_cap = cap * 0.8
+        affected = [nid] + [n for n, _ in req_nodes[:4]]
+        simulations.append({
+            "id": "sim_budget_cut",
+            "title": f"Cut budget by 20% ({_fmt_money(cap)} → {_fmt_money(new_cap)})",
+            "affected_nodes": affected + linked_people([nid]),
+            "impact_summary": (
+                f"The limit stated in your files (\"{_short(f.statement, 14)}\") would drop by {_fmt_money(cap - new_cap)}. "
+                f"{len(req_nodes)} requirement(s) would need to be re-prioritised or descoped to fit."
+            ),
+        })
+
+    if deadline_nodes:
+        nid, f = deadline_nodes[0]
+        affected = [nid] + task_nodes + [n for n, _ in req_nodes[:2]]
+        simulations.append({
+            "id": "sim_deadline_miss",
+            "title": f"Miss deadline: {_short(f.statement, 6)}",
+            "affected_nodes": affected + linked_people([nid]),
+            "impact_summary": (
+                f"If \"{_short(f.statement, 16)}\" slips, {len(task_nodes)} pending action item(s) are delayed "
+                f"and the stakeholder(s) who asked for it should be notified."
+            ),
+        })
+
+    if req_nodes:
+        nid, f = next(((n, x) for n, x in req_nodes if x.priority == "high"), req_nodes[0])
+        simulations.append({
+            "id": "sim_drop_requirement",
+            "title": f"Drop requirement: {_short(f.statement, 6)}",
+            "affected_nodes": [nid] + linked_people([nid]) + [b[0] for b in budget_nodes],
+            "impact_summary": (
+                f"Removing \"{_short(f.statement, 16)}\" would change scope agreed in your files; "
+                f"its requesting stakeholder(s) must sign off, and any budget tied to it can be released."
+            ),
+        })
+
+    return {"nodes": nodes, "edges": edges, "simulations": simulations}
 
 
+# ---------------------------------------------------------------------------
+# Scorecard (static methodology benchmark, contains no project data)
+# ---------------------------------------------------------------------------
 def get_accuracy_scorecard() -> dict[str, Any]:
     """Returns precision, recall, and grounding metrics comparing with vs. without Multi-Agent Validator."""
     return {
@@ -195,34 +246,34 @@ def get_accuracy_scorecard() -> dict[str, Any]:
                 "with_validator": 96.4,
                 "without_validator": 74.1,
                 "improvement": "+22.3%",
-                "detail": "Eliminates chit-chat, conversational filler, and ungrounded statements."
+                "detail": "Eliminates chit-chat, conversational filler, and ungrounded statements.",
             },
             {
                 "name": "Recall (Requirements Extraction)",
                 "with_validator": 94.8,
                 "without_validator": 82.3,
                 "improvement": "+12.5%",
-                "detail": "Specialist agents extract niche financial, compliance, and UI constraints."
+                "detail": "Specialist agents extract niche financial, compliance, and UI constraints.",
             },
             {
                 "name": "Conflict Resolution Accuracy",
                 "with_validator": 99.2,
                 "without_validator": 41.0,
                 "improvement": "+58.2%",
-                "detail": "Detects subtle scheduling disagreements (e.g. Q3 vs October staffing)."
+                "detail": "Detects disagreements between sources (e.g. two different deadlines for the same item).",
             },
             {
                 "name": "Grounding Citation Integrity",
                 "with_validator": 99.1,
                 "without_validator": 68.4,
                 "improvement": "+30.7%",
-                "detail": "100% of statements are mapped directly to verifiable source text spans."
+                "detail": "100% of statements are mapped directly to verifiable source text spans.",
             },
         ],
         "latency_stats": {
             "p50_ms": 280,
             "p95_ms": 640,
-            "model_routing": "Gemini 2.5 Flash -> Fallback -> Local Engine",
-            "cost_per_brd_usd": "$0.0018"
-        }
+            "model_routing": "Gemini Flash -> Fallback -> Local Engine",
+            "cost_per_brd_usd": "$0.0018",
+        },
     }

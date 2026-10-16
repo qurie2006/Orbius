@@ -6,22 +6,23 @@ from app.model_router import generate_json
 from app.schemas import Finding, ScenarioAffectedItem, ScenarioResponse, SourceChunk
 
 
+# Generic presets. All analysis is grounded only in the user's own findings.
 PRESET_SCENARIOS = {
     "budget_cut_30": {
         "title": "Budget Cut by 30%",
-        "prompt": "Simulate reducing total project budget ceiling by 30%. Identify which non-core features, tablet companions, or integrations must be deferred."
+        "prompt": "Simulate reducing the project budget by 30%. Using ONLY the findings below, identify which items must be deferred or descoped."
     },
     "launch_accelerated": {
-        "title": "Accelerate Go-Live by 6 Weeks (Q3 Push)",
-        "prompt": "Simulate pulling launch earlier by 6 weeks. Identify what testing, compliance, and multi-language features must be skipped or fast-tracked."
+        "title": "Deliver 6 Weeks Earlier",
+        "prompt": "Simulate delivering 6 weeks earlier than planned. Using ONLY the findings below, identify what must be fast-tracked or dropped."
     },
     "drop_tablet_scope": {
-        "title": "Drop Staff Tablet Companion Scope",
-        "prompt": "Simulate removing the staff tablet companion device from MVP scope to focus purely on the customer-facing checkout kiosk."
+        "title": "Reduce Scope to Must-Haves",
+        "prompt": "Simulate cutting scope down to mandatory items only. Using ONLY the findings below, list what stays and what is removed."
     },
     "strict_security_wcag": {
-        "title": "Strict Zero-Trust 2FA & WCAG 2.2 AAA Enforcement",
-        "prompt": "Simulate upgrading accessibility and security constraints to maximum level. Identify impact on kiosk hardware specs, manager override latency, and training."
+        "title": "Tighten Security & Compliance",
+        "prompt": "Simulate raising security and compliance requirements to the strictest level. Using ONLY the findings below, identify the impact."
     }
 }
 
@@ -94,45 +95,63 @@ Return a JSON object with keys:
     except Exception:
         pass
 
-    # Heuristic fallback
-    affected = [
-        ScenarioAffectedItem(
-            id=findings[0].id if findings else "f1",
-            statement=findings[0].statement if findings else "Core timeline constraint",
-            impact=f"Adjusted priority and dependencies under '{title}' constraint.",
-            status="delayed" if "cut" in scenario_type or "accelerated" in scenario_type else "compromised",
+    # Heuristic fallback — uses ONLY the user's findings
+    if not findings:
+        return ScenarioResponse(
+            scenario_title=title,
+            impact_summary="No findings yet. Upload files and click **Generate BRD** first, then run a scenario.",
+            affected_items=[],
+            shifted_deadlines=[],
+            new_risks=[],
+            diagram_diff_mermaid=None,
         )
+
+    from app.prototype_agent import _is_budget, _is_deadline, _short
+
+    items = [f for f in findings if f.type != "stakeholder"]
+    must = [f for f in items if re.search(r"\b(must|mandatory|required|require|shall)\b", f.statement.lower())]
+    optional = [f for f in items if f not in must]
+    budgets = [f for f in items if _is_budget(f)]
+    deadlines = [f for f in items if _is_deadline(f)]
+
+    affected: list[ScenarioAffectedItem] = []
+    shifted: list[dict] = []
+    risks: list[str] = []
+    if scenario_type == "budget_cut_30":
+        affected += [ScenarioAffectedItem(id=f.id, statement=f.statement, impact="Budget limit reduced by 30%.", status="compromised") for f in budgets]
+        affected += [ScenarioAffectedItem(id=f.id, statement=f.statement, impact="Non-mandatory item — candidate to defer.", status="delayed") for f in optional[:3]]
+        risks.append("Mandatory items may not fit inside the reduced budget.")
+    elif scenario_type == "launch_accelerated":
+        affected += [ScenarioAffectedItem(id=f.id, statement=f.statement, impact="Date pulled 6 weeks earlier.", status="compromised") for f in deadlines]
+        shifted += [{"item": _short(f.statement, 8), "old_date": "As stated in source", "new_date": "6 weeks earlier", "reason": title} for f in deadlines]
+        affected += [ScenarioAffectedItem(id=f.id, statement=f.statement, impact="May need to be dropped to hit the earlier date.", status="delayed") for f in optional[:3]]
+        risks.append("Less time for review and testing of mandatory items.")
+    elif scenario_type == "drop_tablet_scope":
+        affected += [ScenarioAffectedItem(id=f.id, statement=f.statement, impact="Not mandatory — removed from scope.", status="removed") for f in optional[:5]]
+        risks.append("Stakeholders who requested removed items must agree.")
+    else:
+        affected += [ScenarioAffectedItem(id=f.id, statement=f.statement, impact="Requirement strengthened.", status="enhanced") for f in must[:5]]
+        risks.append("Stricter rules may add cost and time.")
+    if not affected:
+        affected = [ScenarioAffectedItem(id=f.id, statement=f.statement, impact=f"Review under '{title}'.", status="delayed") for f in items[:2]]
+
+    def lbl(s: str) -> str:
+        return re.sub(r"[\"'`<>\[\]{}()|#;:]", " ", _short(s, 6))
+
+    lines = [
+        "graph TD",
+        "    classDef change fill:#fee2e2,stroke:#ef4444,stroke-width:2px;",
+        "    classDef impact fill:#fef3c7,stroke:#f59e0b,stroke-width:2px;",
+        f'    C["{lbl(title)}"]:::change',
     ]
-    if len(findings) > 1:
-        affected.append(
-            ScenarioAffectedItem(
-                id=findings[1].id,
-                statement=findings[1].statement,
-                impact="Requires revised validation from technical architect.",
-                status="enhanced" if "security" in scenario_type else "compromised",
-            )
-        )
-
-    mermaid_diff = """graph TD
-    classDef change fill:#fee2e2,stroke:#ef4444,stroke-width:2px;
-    classDef impact fill:#fef3c7,stroke:#f59e0b,stroke-width:2px;
-    classDef stable fill:#dcfce7,stroke:#10b981,stroke-width:2px;
-
-    Change["⚡ Scenario Trigger: Budget / Timeline Shift"]:::change --> Dep1["Scope Prioritization & Cutbacks"]:::impact
-    Dep1 --> Dep2["Postponed Secondary Features"]:::impact
-    Change --> Core["Core MVP Requirements"]:::stable
-"""
+    for i, a in enumerate(affected[:6]):
+        lines.append(f'    C --> A{i}["{lbl(a.statement)}"]:::impact')
 
     return ScenarioResponse(
         scenario_title=title,
-        impact_summary=f"**Scenario Evaluation**: Under this condition ({instruction}), secondary scope items face schedule reallocations while core security requirements remain baseline.",
+        impact_summary=f"**Scenario Evaluation** ({title}): {len(affected)} item(s) from your files are affected. {len(must)} item(s) are marked mandatory in your sources and should be protected.",
         affected_items=affected,
-        shifted_deadlines=[
-            {"item": "Staff training and rollout", "old_date": "Original target", "new_date": "+3 weeks adjusted", "reason": "Requires revised operational alignment"}
-        ],
-        new_risks=[
-            "Potential friction if store staff are not pre-trained on modified flow",
-            "Third-party vendor turnaround buffer reduced"
-        ],
-        diagram_diff_mermaid=mermaid_diff,
+        shifted_deadlines=shifted,
+        new_risks=risks,
+        diagram_diff_mermaid="\n".join(lines),
     )

@@ -105,6 +105,8 @@ class BrdSection(BaseModel):
     streaming: bool = False
     diagram_type: str | None = None  # e.g. "flowchart", "sequence", "architecture"
     mermaid_code: str | None = None
+    user_flow_code: str | None = None
+    sequence_code: str | None = None
 
 
 class ChangelogEntry(BaseModel):
@@ -134,6 +136,16 @@ class SignUpRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
 
 
 class UserResponse(BaseModel):

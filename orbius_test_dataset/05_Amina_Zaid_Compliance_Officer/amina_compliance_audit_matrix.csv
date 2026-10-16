@@ -1,6 +1,0 @@
-Requirement_ID,Regulation,Component,Mandate,Status,Owner
-COMP-01,PCI-DSS 4.0,Payment Terminal,P2PE hardware tokenization with zero local card storage,Compliant,Amina Zaid
-COMP-02,WCAG 2.2 AA,Kiosk Screen UI,Contrast ratio >= 4.5:1 and auditory cues,In Review,Elena Rostova
-COMP-03,GDPR / CCPA,Receipt Delivery,Automated 30-day PII deletion pipeline,Planned,Elena Rostova
-COMP-04,SOC 2 Type II,Cloud Backend,2FA biometric override for store manager elevated privileges,Compliant,InfoSec
-COMP-05,ESG Decarbonization,Hardware Chassis,Low-power ARM sleep mode reducing idle energy by 45%,Planned,Procurement

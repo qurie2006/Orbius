@@ -199,69 +199,71 @@ def heuristic_findings(chunks: list[SourceChunk], agent: str) -> list[Finding]:
     if any(k in blob for k in ["global warming", "climate change", "essay on", "write an essay", "draft an essay"]):
         return generate_topic_synthesis(blob, chunks, agent)
 
-    def add(statement, source, section, ftype="requirement", priority="high", extra=None):
-        chunk = next((c for c in chunks if source in c.file_name.lower() or source in c.text.lower()), chunks[0] if chunks else None)
-        if not chunk:
-            return
-        conf = compute_dynamic_confidence(statement)
-        findings.append(
-            Finding(
-                id=_id("f"),
-                type=ftype,  # type: ignore[arg-type]
-                statement=statement,
-                source_id=chunk.source_id,
-                source_span=statement if statement.lower() in chunk.text.lower() else chunk.text[:220],
-                confidence=conf,
-                priority=priority,  # type: ignore[arg-type]
-                agent=agent,
-                section=section,  # type: ignore[arg-type]
-                **(extra or {}),
-            )
-        )
+    # NOTE: Every finding below is derived strictly from text present in the
+    # uploaded files. No canned/demo statements are injected.
 
-    # Multilingual / Hinglish Recognition Rules (preserves original phrase as evidence)
-    if "180k" in blob or "180000" in blob or "budget" in blob and ("upar" in blob or "se zyada" in blob or "kam" in blob):
-        add("Budget ceiling is locked at $180,000 maximum including cloud usage.", "180", "budget", "constraint")
-    if "october" in blob and ("pehle" in blob or "nahi" in blob or "stores" in blob):
-        add("Go-live window is Q4; stores cannot be staffed before October.", "october", "scope", "decision", "high")
-    if "2fa" in blob or ("zaroori" in blob and "manager" in blob):
-        add("Store manager overrides must require mandatory 2FA authentication.", "2fa", "functional_requirements")
-    if "30" in blob and ("percent" in blob or "%" in blob or "kam" in blob):
-        add("Reduce average checkout time by 30% in flagship locations.", "30", "objectives")
-    if "offline" in blob and ("50" in blob or "baskets" in blob or "store" in blob):
-        add("Offline queue must buffer up to 50 pending baskets during network loss.", "offline", "non_functional_requirements")
+    header_re = re.compile(r"^(from|to|cc|bcc|date|sent|subject|re|fw|fwd)\s*:", re.IGNORECASE)
+    signoff_re = re.compile(r"^(thanks|thank you|regards|best|best regards|kind regards|cheers|sincerely|warm regards)[,!.\s]*$", re.IGNORECASE)
+    greeting_re = re.compile(r"^(hi|hello|hey|dear)\b.{0,40}[,!]?$", re.IGNORECASE)
 
-    # Specific Keyword Rules with realistic, dynamic evaluation
-    if "2fa" in blob:
-        add("Store manager overrides must require 2FA authentication.", "2FA", "functional_requirements")
-    if "guest checkout" in blob:
-        add("Shoppers can complete guest checkout without creating an account.", "guest checkout", "functional_requirements")
-    if "q3" in blob:
-        add("Launch is targeted for Q3.", "Q3", "scope", "decision", "high")
-    if "q4" in blob:
-        add("Go-live window is Q4; stores cannot be staffed before October.", "Q4", "scope", "decision", "high")
-    if "wcag" in blob:
-        add("Kiosk screens must meet WCAG 2.2 AA contrast and interaction requirements.", "WCAG", "non_functional_requirements", "constraint")
-    if "180k" in blob or "180,000" in blob:
-        add("Budget ceiling is $180,000 including design and Vertex AI usage.", "180", "budget", "constraint")
-    if "30%" in blob:
-        add("Reduce average checkout time by 30% in flagship stores.", "30%", "objectives")
-    if "out of scope" in blob or "native mobile" in blob:
-        add("Native mobile apps are out of scope; kiosk plus staff tablet only.", "out of scope", "scope", "constraint")
-    if "offline" in blob:
-        add("Offline queue must hold up to 50 baskets.", "offline", "non_functional_requirements")
-    if "priya" in blob:
-        add("Priya Mehta is the client sponsor.", "Priya", "stakeholders", "stakeholder", "medium")
-    if "marcus" in blob:
-        add("Marcus Chen represents finance and staffing constraints.", "Marcus", "stakeholders", "stakeholder")
+    # 1) Stakeholders from real email senders (+ signature title if present)
+    signature_lines: set[str] = set()
+    seen_people: set[str] = set()
+    by_file: dict[str, list[SourceChunk]] = {}
+    for c in chunks:
+        by_file.setdefault(c.file_name, []).append(c)
+    for file_chunks in by_file.values():
+        from_match = None
+        from_chunk = None
+        for c in file_chunks:
+            from_match = re.search(r"From:\s*([^\n\r<]+?)\s*(?:<([^>]+)>)?\s*$", c.text, re.IGNORECASE | re.MULTILINE)
+            if from_match:
+                from_chunk = c
+                break
+        lines = [l.strip() for c in file_chunks for l in c.text.split("\n") if l.strip()]
+        title = None
+        for i, line in enumerate(lines):
+            if signoff_re.match(line):
+                sig = lines[i + 1 : i + 4]
+                for s in sig:
+                    signature_lines.add(s)
+                # A signature title is a short line after the name (e.g. "VP of Engineering")
+                if len(sig) >= 2 and len(sig[1]) <= 60 and "@" not in sig[1]:
+                    title = sig[1]
+                break
+        if from_match and from_chunk:
+            name = from_match.group(1).strip().strip('"')
+            if name and name.lower() not in seen_people:
+                seen_people.add(name.lower())
+                statement = f"{name} — {title}" if title else f"{name} (email sender)"
+                findings.append(
+                    Finding(
+                        id=_id("f"),
+                        type="stakeholder",
+                        statement=statement,
+                        source_id=from_chunk.source_id,
+                        source_span=from_match.group(0).strip(),
+                        confidence=0.9,
+                        priority="medium",
+                        agent=agent,
+                        section="stakeholders",
+                    )
+                )
 
-    # Dynamic Sentence & Content Parsing for Custom Uploaded Files
+    # 2) Requirements, constraints, actions from real sentences in the files
     for chunk in chunks:
         lines = [l.strip() for l in chunk.text.split("\n") if l.strip()]
         for line in lines:
             # Clean lead symbols
             clean = re.sub(r"^[-*•\d+\.]+\s*", "", line).strip()
-            if len(clean) < 15 or clean.startswith("From:") or clean.startswith("To:") or clean.startswith("Subject:"):
+            if len(clean) < 15:
+                continue
+            if header_re.match(clean) or signoff_re.match(clean) or greeting_re.match(clean):
+                continue
+            if line in signature_lines or clean in signature_lines:
+                continue
+            # Skip pure section headings like "Budget Ceiling:" or "Action Required Today:"
+            if clean.endswith(":") and len(clean.split()) <= 6:
                 continue
 
             # Determine section by keywords or chunk modality

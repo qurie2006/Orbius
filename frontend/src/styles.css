@@ -240,11 +240,12 @@ html[data-theme="dark"] .btn.primary {
 
 .workspace {
   display: grid;
-  grid-template-columns: 280px minmax(350px, 1fr) 320px;
+  grid-template-columns: minmax(270px, 300px) minmax(0, 1fr) minmax(290px, 340px);
   gap: 16px;
   padding: 16px 20px 28px;
-  max-width: 1100px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   overflow-x: hidden;
   word-wrap: break-word;
 }
@@ -863,18 +864,6 @@ html[data-theme="dark"] .card {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-@media (max-width: 1100px) {
-
-  .workspace,
-  .hero {
-    grid-template-columns: 1fr;
-  }
-
-  .panel {
-    min-height: auto;
-  }
 }
 
 /* Skeleton & Loading Shimmer */
@@ -1720,7 +1709,13 @@ html[data-theme="dark"] .card {
   margin-bottom: 16px;
   border-bottom: 1px solid var(--line);
   padding-bottom: 10px;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.studio-nav-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .studio-nav-btn {
@@ -1756,19 +1751,27 @@ html[data-theme="dark"] .card {
   background: #0f172a;
   border: 1px solid #334155;
   border-radius: 20px;
-  padding: 20px;
+  padding: 22px;
   color: #f8fafc;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .prototype-screen {
   background: #1e293b;
-  border: 2px solid #475569;
+  border: 1px solid #334155;
   border-radius: 16px;
-  padding: 18px;
+  padding: 20px;
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 20px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .kiosk-item-card {
@@ -1963,7 +1966,7 @@ video {
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   .topbar {
     flex-wrap: wrap;
     gap: 10px;
@@ -2009,6 +2012,7 @@ video {
   }
 
   .hero {
+    grid-template-columns: 1fr;
     gap: 24px;
   }
 
@@ -2026,6 +2030,7 @@ video {
   }
 
   .workspace {
+    grid-template-columns: 1fr;
     padding: 10px 10px 24px;
     gap: 12px;
     overflow-x: hidden;
@@ -2034,6 +2039,7 @@ video {
 
   .panel,
   .panel-sources {
+    min-height: auto;
     padding: 16px;
     border-radius: 18px;
     overflow-x: hidden;

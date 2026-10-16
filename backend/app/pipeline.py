@@ -51,11 +51,17 @@ def detect_conflicts(findings: list[Finding]) -> list[Conflict]:
         conflicts.append(
             Conflict(
                 id=_new_id("c"),
-                topic="Launch window",
+                topic="Delivery Timeline Conflict (Quarter 3 vs Quarter 4)",
                 left=q3[0],
                 right=q4[0],
-                disagreement="One source locks launch to Q3; another requires Q4 because stores cannot be staffed before October.",
-                suggested_question="Which launch window should the BRD treat as canonical — Q3 or Q4?",
+                disagreement=(
+                    "Calendar timing discrepancy between sources: One document targets Quarter 3 (Q3: July to September), "
+                    "while another specifies Quarter 4 (Q4: October to December / after October)."
+                ),
+                suggested_question=(
+                    "Which target delivery window should the specification follow as canonical: "
+                    "Quarter 3 (July to September) or Quarter 4 (October to December)?"
+                ),
             )
         )
     return conflicts
@@ -107,6 +113,8 @@ def compose_sections(findings: list[Finding], conflicts: list[Conflict], chunks:
                     finding_ids=[f.id for f in findings[:6]],
                     diagram_type="architecture",
                     mermaid_code=diagrams_data.get("architecture"),
+                    user_flow_code=diagrams_data.get("user_flow"),
+                    sequence_code=diagrams_data.get("sequence"),
                 )
             )
             continue

@@ -45,65 +45,73 @@ Important:
                 cleaned = re.sub(r"```$", "", cleaned).strip()
             data = json.loads(cleaned)
             if isinstance(data, dict) and "architecture" in data:
+                fallback = _diagrams_from_findings(findings)
                 return {
-                    "architecture": data.get("architecture") or DEFAULT_MERMAID,
-                    "user_flow": data.get("user_flow") or DEFAULT_MERMAID,
-                    "sequence": data.get("sequence") or DEFAULT_MERMAID,
+                    "architecture": data.get("architecture") or fallback["architecture"],
+                    "user_flow": data.get("user_flow") or fallback["user_flow"],
+                    "sequence": data.get("sequence") or fallback["sequence"],
                 }
     except Exception:
         pass
 
-    # Heuristic dynamic diagrams based on findings
-    statements = [f.statement.lower() for f in findings]
-    has_auth = any("2fa" in s or "auth" in s or "login" in s for s in statements)
-    has_offline = any("offline" in s for s in statements)
-    
-    arch = f"""graph TD
-    classDef client fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#374151;
-    classDef api fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#374151;
-    classDef db fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#374151;
-    classDef sec fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#374151;
+    # Heuristic diagrams built ONLY from the user's findings (no demo template)
+    return _diagrams_from_findings(findings)
 
-    User["👤 Shopper / Staff Terminal"]:::client --> Gateway["🌐 API Gateway"]:::api
-    {"Gateway --> AuthServer['🔒 2FA & Auth Service']:::sec" if has_auth else ""}
-    Gateway --> ServiceCore["⚙️ Core Business Engine"]:::api
-    {"ServiceCore --> OfflineSync['📡 Offline Cache & Queue']:::sec" if has_offline else ""}
-    ServiceCore --> Database[("🗄️ Database & Inventory Store")]:::db
-    ServiceCore --> OpsAgent["📋 Ops & Task Dispatcher"]:::client
-"""
 
-    user_flow = """flowchart LR
-    classDef step fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#374151;
-    classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#374151;
-    classDef finish fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#374151;
+def _label(text: str, words: int = 6) -> str:
+    clean = re.sub(r"[\"'`<>\[\]{}()|#;:]", " ", text)
+    clean = re.sub(r"\s+", " ", clean).strip().rstrip(".")
+    parts = clean.split(" ")
+    return " ".join(parts[:words]) + ("..." if len(parts) > words else "")
 
-    Start([Start Session]):::step --> Select[Identify Intent / Scan]:::step
-    Select --> Check{Requires Override?}:::decision
-    Check -- Yes --> Auth[Manager 2FA Verification]:::step
-    Check -- No --> Process[Process Request / Payment]:::step
-    Auth --> Process
-    Process --> Complete([Complete & Receipt]):::finish
-"""
 
-    sequence = """sequenceDiagram
-    autonumber
-    actor User as Stakeholder / User
-    participant Frontend as Studio UI / Terminal
-    participant API as Orbius API Gateway
-    participant Agent as Multi-Agent Core
-    participant DB as SQLite / Vector Store
+def _diagrams_from_findings(findings: list[Finding]) -> dict[str, str]:
+    if not findings:
+        empty = 'graph TD\n    A["Upload files to generate diagrams"]'
+        return {"architecture": empty, "user_flow": empty, "sequence": empty}
 
-    User->>Frontend: Submit Input & Documents
-    Frontend->>API: Upload / Streaming Request
-    API->>Agent: Parallel Specialists (Text, Doc, Vision)
-    Agent->>DB: Ground Chunks & Detect Conflicts
-    DB-->>Agent: Evidence & Validation
-    Agent-->>Frontend: Stream Validated BRD & Actions
-    Frontend-->>User: Interactive Requirements & Gantt Calendar
-"""
+    people = [re.split(r"\s+—\s+|\s+\(", f.statement, maxsplit=1)[0].strip() for f in findings if f.type == "stakeholder" or f.section == "stakeholders"]
+    people = [p for p in dict.fromkeys(people) if p][:4]
+    items = [f for f in findings if f.type != "stakeholder" and f.section != "stakeholders"][:8]
 
-    return {
-        "architecture": arch,
-        "user_flow": user_flow,
-        "sequence": sequence,
+    groups = {
+        "Requirements": [f for f in items if f.section in ("functional_requirements", "non_functional_requirements", "objectives", "scope")],
+        "Budget": [f for f in items if f.section == "budget"],
+        "Risks & Other": [f for f in items if f.section not in ("functional_requirements", "non_functional_requirements", "objectives", "scope", "budget")],
     }
+
+    arch = [
+        "graph TD",
+        "    classDef person fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#374151;",
+        "    classDef group fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#374151;",
+        "    classDef item fill:#fef3c7,stroke:#d97706,stroke-width:1px,color:#374151;",
+        '    P0["Project"]:::group',
+    ]
+    for i, p in enumerate(people):
+        arch.append(f'    S{i}["{_label(p, 4)}"]:::person --> P0')
+    for gi, (gname, gitems) in enumerate(groups.items()):
+        if not gitems:
+            continue
+        arch.append(f'    P0 --> G{gi}["{gname}"]:::group')
+        for ii, f in enumerate(gitems):
+            arch.append(f'    G{gi} --> I{gi}_{ii}["{_label(f.statement)}"]:::item')
+
+    flow = [
+        "flowchart LR",
+        "    classDef step fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#374151;",
+        "    classDef finish fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#374151;",
+        "    Start([Start]):::step",
+    ]
+    prev = "Start"
+    for i, f in enumerate(items[:6]):
+        flow.append(f'    {prev} --> F{i}["{_label(f.statement)}"]:::step')
+        prev = f"F{i}"
+    flow.append(f"    {prev} --> Done([Done]):::finish")
+
+    requester = _label(people[0], 3) if people else "Stakeholder"
+    seq = ["sequenceDiagram", "    autonumber", f'    actor R as {requester}', "    participant T as Project Team"]
+    for f in items[:6]:
+        seq.append(f"    R->>T: {_label(f.statement, 8)}")
+    seq.append("    T-->>R: Confirms delivery against requirements")
+
+    return {"architecture": "\n".join(arch), "user_flow": "\n".join(flow), "sequence": "\n".join(seq)}

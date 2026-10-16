@@ -32,22 +32,43 @@ async function jsonFetch(url, options = {}) {
   };
   try {
     const res = await fetch(url, { ...options, headers });
-    if (!res.ok) {
-      const text = await res.text();
-      try {
-        const parsed = JSON.parse(text);
-        throw new Error(parsed.error || parsed.detail || text);
-      } catch (err) {
-        throw new Error(err.message || text || `Server error (${res.status})`);
+    const text = await res.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      if (res.status === 502 || res.status === 503 || res.status === 504 || text.includes("The page")) {
+        throw new Error("Backend server is waking up or temporarily unreachable. Please wait ~30 seconds and try again.");
       }
+      throw new Error(`Invalid response from server (${res.status}). Please verify the backend is running.`);
     }
-    return res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || data.detail || `Server error (${res.status})`);
+    }
+    return data;
   } catch (err) {
     if (err.message && (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))) {
       throw new Error("Unable to connect to the backend server. Please verify backend is running on port 8000.");
     }
     throw err;
   }
+}
+
+const AGENT_FRIENDLY_NAMES = {
+  text_agent: "Requirements Analyst",
+  budget_agent: "Finance & Budget Specialist",
+  risk_agent: "Compliance & Risk Auditor",
+  ops_agent: "Operations & Action Planner",
+  vision_agent: "UI & Wireframe Specialist",
+  document_agent: "Document & Data Parser",
+  validator_agent: "Consensus Validator",
+  diagram_agent: "Architecture Specialist",
+};
+
+function formatAgentName(name) {
+  if (!name) return "AI Specialist";
+  return AGENT_FRIENDLY_NAMES[name] || name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 // ==========================================
@@ -60,57 +81,53 @@ function MermaidViewer({ section, findings, chunks }) {
   const containerRef = useRef(null);
 
   const diagrams = useMemo(() => {
-    // Generate default/custom diagram definitions
-    const archCode = section.mermaid_code || `graph TD
-    classDef client fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#374151;
-    classDef api fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#374151;
-    classDef db fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#374151;
-    classDef sec fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#374151;
+    function cleanLabel(s, words = 6) {
+      const clean = (s || "").replace(/["'`<>[\]{}()|#;:]/g, " ").replace(/\s+/g, " ").trim();
+      const parts = clean.split(" ");
+      return parts.slice(0, words).join(" ") + (parts.length > words ? "..." : "");
+    }
 
-    User["👤 Shopper / Staff Terminal"]:::client --> Gateway["🌐 API Gateway & Router"]:::api
-    Gateway --> AuthServer["🔒 2FA & Auth Engine"]:::sec
-    Gateway --> CoreService["⚙️ Core Transaction Engine"]:::api
-    CoreService --> OfflineQueue["📡 Offline Queue & Sync"]:::sec
-    CoreService --> DB[("🗄️ Database Store")]:::db
-    CoreService --> OpsAgent["📋 Ops & Task Dispatcher"]:::client`;
+    const people = (findings || [])
+      .filter((f) => f.type === "stakeholder" || f.section === "stakeholders")
+      .map((f) => cleanLabel(f.statement, 4));
+    const items = (findings || [])
+      .filter((f) => f.type !== "stakeholder" && f.section !== "stakeholders")
+      .slice(0, 6);
 
-    const userFlowCode = `flowchart LR
-    classDef step fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#374151;
-    classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#374151;
-    classDef finish fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#374151;
+    const defaultArch = section.mermaid_code || `graph TD
+    classDef primary fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#1e293b;
+    classDef person fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#1e293b;
+    classDef item fill:#fef3c7,stroke:#d97706,stroke-width:1px,color:#1e293b;
 
-    Start([Start Session]):::step --> Scan[Scan Item / Bag]:::step
-    Scan --> Check{Requires 2FA Override?}:::decision
-    Check -- Yes --> Auth[Manager 2FA Auth]:::step
-    Check -- No --> Pay[Guest Checkout / Pay]:::step
-    Auth --> Pay
-    Pay --> Done([Print Receipt & Finish]):::finish`;
+    P0["Project Scope"]:::primary
+    ${people.map((p, i) => `S${i}["👤 ${p}"]:::person --> P0`).join("\n    ")}
+    ${items.map((it, i) => `P0 --> R${i}["📋 ${cleanLabel(it.statement, 5)}"]:::item`).join("\n    ")}`;
 
-    const seqCode = `sequenceDiagram
+    const defaultUserFlow = section.user_flow_code || `flowchart LR
+    classDef step fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#1e293b;
+    classDef finish fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#1e293b;
+
+    Start([Start]):::step
+    ${items.length > 0 ? items.map((it, i) => `${i === 0 ? "Start" : `F${i - 1}`} --> F${i}["${cleanLabel(it.statement, 5)}"]:::step`).join("\n    ") : "Start --> Process[Process Requirements]:::step"}
+    ${items.length > 0 ? `F${items.length - 1} --> Done([Complete]):::finish` : "Process --> Done([Complete]):::finish"}`;
+
+    const requester = people[0] || "Stakeholder";
+    const defaultSeq = section.sequence_code || `sequenceDiagram
     autonumber
-    actor Shopper as Customer / Shopper
-    participant Kiosk as Kiosk UI Terminal
-    participant Gateway as API Gateway
-    participant Auth as 2FA Security Service
-    participant DB as Product DB & Inventory
+    actor User as ${requester}
+    participant System as System Gateway
+    participant Team as Execution Team
 
-    Shopper->>Kiosk: Select Items & Guest Checkout
-    Kiosk->>Gateway: Submit Basket Request
-    Gateway->>DB: Query Product Pricing & Stock
-    DB-->>Gateway: Verified Basket Data
-    alt Manager Override Needed
-        Gateway->>Auth: Request 2FA Approval
-        Auth-->>Gateway: Override Granted
-    end
-    Gateway-->>Kiosk: Payment Processed
-    Kiosk-->>Shopper: Physical / Digital Receipt`;
+    User->>System: Submit Requirements & Directives
+    ${items.slice(0, 3).map((it) => `System->>Team: Enforce: ${cleanLabel(it.statement, 6)}`).join("\n    ")}
+    Team-->>User: Verification Complete & Artifacts Generated`;
 
     return {
-      architecture: archCode,
-      user_flow: userFlowCode,
-      sequence: seqCode,
+      architecture: section.mermaid_code || defaultArch,
+      user_flow: section.user_flow_code || defaultUserFlow,
+      sequence: section.sequence_code || defaultSeq,
     };
-  }, [section]);
+  }, [section, findings]);
 
   useEffect(() => {
     let isMounted = true;
@@ -382,10 +399,10 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([
-    "What are the highest timeline risks?",
+    "What are the main requirements?",
     "Summarize all budget constraints",
-    "Why was Q4 chosen over Q3?",
-    "Draft a project kickoff email",
+    "What deadlines or action items are there?",
+    "Draft a reply email to the sender",
   ]);
   const chatEndRef = useRef(null);
 
@@ -524,10 +541,10 @@ function ScenarioSimulatorModal({ isOpen, onClose }) {
   const [diffSvg, setDiffSvg] = useState("");
 
   const presets = [
-    { id: "budget_cut_30", label: "📉 Budget Cut 30%", desc: "Simulate impact of reduced budget ceiling" },
-    { id: "launch_accelerated", label: "⏩ Accelerate 6 Weeks", desc: "Fast-track launch into Q3" },
-    { id: "drop_tablet_scope", label: "✂️ Drop Staff Tablet", desc: "Remove companion device from MVP" },
-    { id: "strict_security_wcag", label: "🔒 Strict 2FA & WCAG", desc: "Maximize security & accessibility grade" },
+    { id: "budget_cut_30", label: "📉 Budget Cut 30%", desc: "What if the budget shrinks?" },
+    { id: "launch_accelerated", label: "⏩ Deliver 6 Weeks Early", desc: "What if deadlines move earlier?" },
+    { id: "drop_tablet_scope", label: "✂️ Must-Haves Only", desc: "Keep only mandatory items" },
+    { id: "strict_security_wcag", label: "🔒 Stricter Security", desc: "Raise security & compliance rules" },
   ];
 
   async function runSimulation(type) {
@@ -596,7 +613,7 @@ function ScenarioSimulatorModal({ isOpen, onClose }) {
           <div style={{ display: "flex", gap: 8 }}>
             <input
               type="text"
-              placeholder="e.g. What if client mandates offline payment sync under 2 seconds?"
+              placeholder="e.g. What if the deadline moves to next Friday?"
               value={customPrompt}
               onChange={(e) => setCustomPrompt(e.target.value)}
             />
@@ -661,256 +678,387 @@ function ScenarioSimulatorModal({ isOpen, onClose }) {
 // FEATURE: BRD -> Clickable Interactive Prototype
 // ==========================================
 function InteractivePrototype({ findings, chunks }) {
-  const [cart, setCart] = useState([
-    { id: 1, name: "Espresso Roast Coffee", price: 4.5, qty: 1, sku: "SKU-9921" },
-    { id: 2, name: "Artisan Protein Snack Box", price: 8.0, qty: 1, sku: "SKU-4412" },
-  ]);
-  const [offlineMode, setOfflineMode] = useState(false);
-  const [offlineQueue, setOfflineQueue] = useState(3);
-  const [syncing, setSyncing] = useState(false);
+  const reqItems = useMemo(
+    () => (findings || []).filter((f) => f.type !== "stakeholder" && f.section !== "stakeholders"),
+    [findings]
+  );
+  const stakeholders = useMemo(
+    () => (findings || []).filter((f) => f.type === "stakeholder" || f.section === "stakeholders"),
+    [findings]
+  );
+
+  // Detect rules from findings
+  const thresholdRule = useMemo(() => {
+    return reqItems.find((f) => /\$\s?[\d,]+/.test(f.statement) && /above|over|exceed|threshold|2fa|override/i.test(f.statement));
+  }, [reqItems]);
+
+  const thresholdAmount = useMemo(() => {
+    if (!thresholdRule) return 500;
+    const match = thresholdRule.statement.match(/\$\s?([\d,]+)/);
+    return match ? parseFloat(match[1].replace(/,/g, "")) : 500;
+  }, [thresholdRule]);
+
+  const budgetRule = useMemo(() => {
+    return reqItems.find((f) => f.section === "budget" || /budget|ceiling|cap|allocation/i.test(f.statement));
+  }, [reqItems]);
+
+  const budgetCap = useMemo(() => {
+    if (!budgetRule) return null;
+    const match = budgetRule.statement.match(/\$\s?([\d,]+(?:\.\d+)?)\s*(k|m)?/i);
+    if (!match) return null;
+    let val = parseFloat(match[1].replace(/,/g, ""));
+    if (match[2]?.toLowerCase() === "k") val *= 1000;
+    if (match[2]?.toLowerCase() === "m") val *= 1000000;
+    return val;
+  }, [budgetRule]);
+
+  // State
+  const [testAmount, setTestAmount] = useState(thresholdAmount ? thresholdAmount + 150 : 650);
+  const [testSpend, setTestSpend] = useState(budgetCap ? budgetCap * 0.75 : 120000);
   const [overrideModal, setOverrideModal] = useState(false);
   const [overridePin, setOverridePin] = useState("");
   const [overrideMessage, setOverrideMessage] = useState(null);
-  const [paidReceipt, setPaidReceipt] = useState(null);
-  const [auditLogs, setAuditLogs] = useState([
-    { ts: "10:14:22 UTC", event: "Terminal initialized (WCAG 2.2 AA mode enabled)" },
-    { ts: "10:15:05 UTC", event: "2FA Biometric healthcheck passed" },
+  const [verifiedList, setVerifiedList] = useState({});
+  const [actionDispatched, setActionDispatched] = useState(false);
+  const [auditLogs, setAuditLogs] = useState(() => [
+    { ts: new Date().toISOString().slice(11, 19) + " UTC", event: "Prototype initialized from verified BRD findings" },
   ]);
 
-  const subtotal = useMemo(() => cart.reduce((acc, it) => acc + it.price * it.qty, 0), [cart]);
-  const tax = useMemo(() => subtotal * 0.08, [subtotal]);
-  const total = useMemo(() => subtotal + tax, [subtotal, tax]);
-
-  const inventory = [
-    { id: 3, name: "Smart Thermal Bottle", price: 24.0, sku: "SKU-8819" },
-    { id: 4, name: "Noise-Isolating Headphones", price: 45.0, sku: "SKU-3120" },
-    { id: 5, name: "Reusable Organic Cotton Tote", price: 3.5, sku: "SKU-1092" },
-  ];
-
-  function addItem(item) {
-    setCart((prev) => {
-      const existing = prev.find((x) => x.id === item.id);
-      if (existing) {
-        return prev.map((x) => (x.id === item.id ? { ...x, qty: x.qty + 1 } : x));
-      }
-      return [...prev, { ...item, qty: 1 }];
-    });
+  if (!findings || findings.length === 0) {
+    return (
+      <div className="card" style={{ textAlign: "center", padding: 36 }}>
+        <p className="muted" style={{ margin: 0 }}>
+          Generate a BRD first — the interactive prototype will be built dynamically from your project's findings.
+        </p>
+      </div>
+    );
   }
 
-  function removeItem(id) {
-    setCart((prev) => prev.filter((x) => x.id !== id));
-  }
-
-  function handleGuestCheckout() {
-    if (cart.length === 0) return;
-    if (offlineMode) {
-      if (offlineQueue >= 50) {
-        alert("⚠️ Offline queue capacity (50 baskets) reached. Please reconnect.");
-        return;
-      }
-      setOfflineQueue((q) => q + 1);
-      setPaidReceipt({
-        id: `OFFLINE-TX-${Date.now().toString().slice(-6)}`,
-        total,
-        itemsCount: cart.reduce((a, b) => a + b.qty, 0),
-        offline: true,
-      });
-      setCart([]);
-      return;
-    }
-
-    setPaidReceipt({
-      id: `ORB-TX-${Date.now().toString().slice(-6)}`,
-      total,
-      itemsCount: cart.reduce((a, b) => a + b.qty, 0),
-      offline: false,
-    });
-    setCart([]);
-  }
+  const requires2FA = thresholdRule ? testAmount > thresholdAmount : false;
+  const exceedsBudget = budgetCap ? testSpend > budgetCap : false;
 
   function handleVerifyOverride() {
-    if (overridePin === "4829" || overridePin.length >= 4) {
-      setOverrideMessage({ ok: true, text: "✓ 2FA Verified. Supervisor Override Approved." });
+    if (overridePin.length >= 4) {
+      setOverrideMessage({ ok: true, text: "✓ 2FA Verified. Elevated action approved." });
       setAuditLogs((prev) => [
-        { ts: new Date().toISOString().slice(11, 19) + " UTC", event: "2FA Override Approved (Manager PIN 4829)" },
+        { ts: new Date().toISOString().slice(11, 19) + " UTC", event: `2FA Approved for $${testAmount.toLocaleString()} transaction` },
         ...prev,
       ]);
       setTimeout(() => {
         setOverrideModal(false);
         setOverridePin("");
         setOverrideMessage(null);
-      }, 1200);
+      }, 1000);
     } else {
-      setOverrideMessage({ ok: false, text: "✕ Invalid 2FA PIN. Access Denied." });
+      setOverrideMessage({ ok: false, text: "✕ Invalid PIN. Enter at least 4 digits." });
     }
   }
 
-  function toggleNetwork() {
-    if (offlineMode) {
-      // Reconnecting -> sync
-      setSyncing(true);
-      setTimeout(() => {
-        setSyncing(false);
-        setOfflineMode(false);
-        setAuditLogs((prev) => [
-          { ts: new Date().toISOString().slice(11, 19) + " UTC", event: `Synced ${offlineQueue} offline baskets to cloud in 1.4s` },
-          ...prev,
-        ]);
-        setOfflineQueue(0);
-      }, 1500);
-    } else {
-      setOfflineMode(true);
-    }
+  function toggleVerified(id, stmt) {
+    setVerifiedList((prev) => {
+      const next = !prev[id];
+      setAuditLogs((logs) => [
+        { ts: new Date().toISOString().slice(11, 19) + " UTC", event: `${next ? "Verified" : "Unchecked"} rule: ${stmt.slice(0, 45)}...` },
+        ...logs,
+      ]);
+      return { ...prev, [id]: next };
+    });
+  }
+
+  function handleDispatchAction() {
+    setActionDispatched(true);
+    setAuditLogs((prev) => [
+      { ts: new Date().toISOString().slice(11, 19) + " UTC", event: "Proposal dispatch simulated to verified stakeholder" },
+      ...prev,
+    ]);
   }
 
   return (
     <div className="prototype-container">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <div>
-          <h3 style={{ margin: "0 0 2px", color: "#38bdf8" }}>📱 Live Interactive Kiosk Prototype</h3>
+          <h3 style={{ margin: "0 0 2px", color: "#38bdf8" }}>⚡ Interactive Requirements Simulator</h3>
           <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
-            Generated directly from extracted BRD requirements (2FA Overrides, Guest Checkout, 50-Basket Offline Queue).
+            Live interactive prototype generated strictly from your uploaded source findings.
           </p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button
-            type="button"
-            className={`btn ${offlineMode ? "warn" : "ghost"}`}
-            style={{ fontSize: "0.78rem", padding: "4px 10px" }}
-            onClick={toggleNetwork}
-          >
-            {syncing ? "📡 Syncing to Cloud..." : offlineMode ? "⚠️ Network: OFFLINE (Buffer Active)" : "🟢 Network: ONLINE"}
-          </button>
-          <span className="chip" style={{ background: "#0284c7", color: "#fff", fontSize: "0.75rem" }}>
-            WCAG 2.2 AA Verified
-          </span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {stakeholders.map((s, idx) => (
+            <span key={idx} className="chip" style={{ background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8", fontSize: "0.75rem" }}>
+              👤 {s.statement}
+            </span>
+          ))}
         </div>
       </div>
 
-      <div className="prototype-screen">
-        {/* Left Side: Product Scanner & Catalog */}
-        <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <strong style={{ fontSize: "0.9rem" }}>Barcode Scanner / Quick Add:</strong>
-            <span className="muted" style={{ fontSize: "0.75rem" }}>Scan SLA: &lt;250ms</span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {inventory.map((item) => (
-              <div key={item.id} className="kiosk-item-card" onClick={() => addItem(item)}>
-                <div>
-                  <strong style={{ fontSize: "0.88rem" }}>{item.name}</strong>
-                  <span className="muted" style={{ display: "block", fontSize: "0.75rem" }}>{item.sku}</span>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <strong style={{ color: "#34d399", fontSize: "0.92rem" }}>${item.price.toFixed(2)}</strong>
-                  <span className="chip" style={{ marginLeft: 8, padding: "2px 8px", fontSize: "0.75rem" }}>+ Scan</span>
-                </div>
+      <div className="prototype-screen" style={{ gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr)", gap: 20 }}>
+        {/* Left Column: Interactive Rule Testing */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0, width: "100%" }}>
+          {/* Threshold / 2FA Simulator */}
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, minWidth: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+              <strong style={{ fontSize: "0.92rem", display: "flex", alignItems: "center", gap: 6 }}>
+                <span>🔐</span> Security & Threshold Evaluation
+              </strong>
+              <span className="chip" style={{ fontSize: "0.72rem", background: requires2FA ? "rgba(244, 63, 94, 0.2)" : "rgba(16, 185, 129, 0.2)", color: requires2FA ? "#f43f5e" : "#34d399", border: `1px solid ${requires2FA ? "#f43f5e" : "#10b981"}` }}>
+                {requires2FA ? "2FA Triggered" : "Standard Flow"}
+              </span>
+            </div>
+            <p className="muted" style={{ fontSize: "0.8rem", margin: "0 0 14px", lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere" }}>
+              {thresholdRule ? thresholdRule.statement : "Test transaction authorization rules against stated criteria."}
+            </p>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+              <label style={{ fontSize: "0.82rem", color: "var(--muted)" }}>Transaction Value:</label>
+              <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                <span style={{ position: "absolute", left: 10, color: "var(--muted)", fontWeight: 700 }}>$</span>
+                <input
+                  type="number"
+                  value={testAmount}
+                  onChange={(e) => setTestAmount(parseFloat(e.target.value) || 0)}
+                  style={{ width: 140, padding: "7px 10px 7px 22px", fontSize: "0.95rem", fontWeight: 700, borderRadius: 8, border: "1px solid var(--line)", background: "rgba(0,0,0,0.2)" }}
+                />
               </div>
-            ))}
+              <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>Threshold: <strong>${thresholdAmount.toLocaleString()}</strong></span>
+            </div>
+
+            {/* Quick Presets */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="chip"
+                style={{ cursor: "pointer", fontSize: "0.72rem", background: testAmount === thresholdAmount - 100 ? "rgba(56, 189, 248, 0.2)" : "rgba(255,255,255,0.03)" }}
+                onClick={() => setTestAmount(Math.max(0, thresholdAmount - 100))}
+              >
+                ${Math.max(0, thresholdAmount - 100).toLocaleString()} (Below)
+              </button>
+              <button
+                type="button"
+                className="chip"
+                style={{ cursor: "pointer", fontSize: "0.72rem", background: testAmount === thresholdAmount ? "rgba(56, 189, 248, 0.2)" : "rgba(255,255,255,0.03)" }}
+                onClick={() => setTestAmount(thresholdAmount)}
+              >
+                ${thresholdAmount.toLocaleString()} (Limit)
+              </button>
+              <button
+                type="button"
+                className="chip"
+                style={{ cursor: "pointer", fontSize: "0.72rem", background: testAmount === thresholdAmount + 250 ? "rgba(56, 189, 248, 0.2)" : "rgba(255,255,255,0.03)" }}
+                onClick={() => setTestAmount(thresholdAmount + 250)}
+              >
+                ${(thresholdAmount + 250).toLocaleString()} (Elevated)
+              </button>
+            </div>
+
+            {requires2FA ? (
+              <div style={{ background: "rgba(244, 63, 94, 0.12)", border: "1px solid #f43f5e", borderRadius: 10, padding: 12 }}>
+                <p style={{ margin: "0 0 8px", fontSize: "0.82rem", color: "#fda4af", lineHeight: 1.4, wordBreak: "break-word" }}>
+                  ⚠️ Amount (${testAmount.toLocaleString()}) exceeds the ${thresholdAmount.toLocaleString()} ceiling — mandatory 2FA required.
+                </p>
+                <button
+                  type="button"
+                  className="btn primary"
+                  style={{ fontSize: "0.82rem", padding: "6px 14px", cursor: "pointer" }}
+                  onClick={() => setOverrideModal(true)}
+                >
+                  🔒 Complete 2FA Verification
+                </button>
+              </div>
+            ) : (
+              <div style={{ background: "rgba(16, 185, 129, 0.12)", border: "1px solid #10b981", borderRadius: 10, padding: 12 }}>
+                <p style={{ margin: 0, fontSize: "0.82rem", color: "#6ee7b7", lineHeight: 1.4, wordBreak: "break-word" }}>
+                  ✓ Value (${testAmount.toLocaleString()}) is at or below threshold. Processed without elevated 2FA.
+                </p>
+              </div>
+            )}
           </div>
 
-          <div style={{ marginTop: 16, background: "#090d16", padding: 10, borderRadius: 10, border: "1px solid #1e293b" }}>
-            <strong style={{ fontSize: "0.8rem", color: "#94a3b8" }}>Terminal Audit Stream:</strong>
-            <div style={{ maxHeight: 75, overflowY: "auto", fontSize: "0.75rem", marginTop: 4, display: "flex", flexDirection: "column", gap: 3 }}>
+          {/* Budget Guardrail Simulator */}
+          {budgetCap && (
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, minWidth: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                <strong style={{ fontSize: "0.92rem", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>💰</span> Budget Guardrail Tracker
+                </strong>
+                <span className="chip" style={{ fontSize: "0.72rem", background: exceedsBudget ? "rgba(244, 63, 94, 0.2)" : "rgba(251, 191, 36, 0.2)", color: exceedsBudget ? "#f43f5e" : "#fbbf24", border: `1px solid ${exceedsBudget ? "#f43f5e" : "#fbbf24"}` }}>
+                  Limit: ${budgetCap.toLocaleString()}
+                </span>
+              </div>
+              <p className="muted" style={{ fontSize: "0.78rem", margin: "0 0 12px", lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere" }}>
+                {budgetRule?.statement}
+              </p>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
+                <span>Simulated Spend: <strong>${testSpend.toLocaleString()}</strong> ({Math.round((testSpend / budgetCap) * 100)}%)</span>
+                <span style={{ color: exceedsBudget ? "#f43f5e" : "#34d399", fontWeight: 600 }}>
+                  {exceedsBudget ? `Over by $${(testSpend - budgetCap).toLocaleString()}` : `Remaining: $${(budgetCap - testSpend).toLocaleString()}`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={budgetCap * 0.3}
+                max={budgetCap * 1.5}
+                step={Math.max(1000, Math.round(budgetCap * 0.05))}
+                value={testSpend}
+                onChange={(e) => setTestSpend(parseFloat(e.target.value))}
+                style={{ width: "100%", accentColor: exceedsBudget ? "#f43f5e" : "#38bdf8", cursor: "pointer" }}
+              />
+            </div>
+          )}
+
+          {/* Action Item / Proposal Dispatch Simulator */}
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, minWidth: 0 }}>
+            <strong style={{ fontSize: "0.92rem", display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+              <span>📤</span> Stakeholder Deliverable Dispatch
+            </strong>
+            <p className="muted" style={{ fontSize: "0.78rem", margin: "0 0 14px", lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere" }}>
+              Simulate dispatching technical architecture deliverables to the recipient requested in the source document.
+            </p>
+            <button
+              type="button"
+              className="btn"
+              disabled={actionDispatched}
+              onClick={handleDispatchAction}
+              style={{ fontSize: "0.82rem", padding: "8px 16px", cursor: actionDispatched ? "default" : "pointer" }}
+            >
+              {actionDispatched ? "✓ Deliverable Dispatched & Logged" : "📨 Dispatch Updated Architecture Proposal"}
+            </button>
+          </div>
+        </div>
+
+        {/* Right Column: Live Requirement Verification & Audit Log */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0, width: "100%" }}>
+          {/* Requirement Verification Checklist */}
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <strong style={{ fontSize: "0.95rem", display: "block" }}>📋 Requirements Compliance Matrix</strong>
+                <span className="muted" style={{ fontSize: "0.76rem" }}>
+                  {Object.values(verifiedList).filter(Boolean).length} of {reqItems.length} Verified ({reqItems.length ? Math.round((Object.values(verifiedList).filter(Boolean).length / reqItems.length) * 100) : 0}%)
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  className="chip"
+                  style={{ cursor: "pointer", background: "rgba(56, 189, 248, 0.12)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)", fontSize: "0.72rem" }}
+                  onClick={() => {
+                    const all = {};
+                    reqItems.forEach((r) => { all[r.id] = true; });
+                    setVerifiedList(all);
+                    setAuditLogs((l) => [{ ts: new Date().toISOString().slice(11, 19) + " UTC", event: `Verified all ${reqItems.length} requirements` }, ...l]);
+                  }}
+                >
+                  ✓ Verify All
+                </button>
+                <button
+                  type="button"
+                  className="chip"
+                  style={{ cursor: "pointer", background: "rgba(255, 255, 255, 0.05)", border: "1px solid var(--line)", fontSize: "0.72rem" }}
+                  onClick={() => {
+                    setVerifiedList({});
+                    setAuditLogs((l) => [{ ts: new Date().toISOString().slice(11, 19) + " UTC", event: "Reset all requirement checks" }, ...l]);
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            {/* Verification Progress Bar */}
+            <div style={{ width: "100%", height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 999, overflow: "hidden", marginBottom: 14 }}>
+              <div
+                style={{
+                  width: `${reqItems.length ? (Object.values(verifiedList).filter(Boolean).length / reqItems.length) * 100 : 0}%`,
+                  height: "100%",
+                  background: "linear-gradient(90deg, #10b981, #38bdf8)",
+                  transition: "width 0.3s ease",
+                }}
+              />
+            </div>
+
+            {/* Scrollable list taking full available height */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minHeight: 360, maxHeight: 480, overflowY: "auto", paddingRight: 4 }}>
+              {reqItems.map((f) => {
+                const isChecked = !!verifiedList[f.id];
+                return (
+                  <div
+                    key={f.id}
+                    onClick={() => toggleVerified(f.id, f.statement)}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 12,
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: isChecked ? "rgba(16, 185, 129, 0.08)" : "rgba(255,255,255,0.02)",
+                      border: `1px solid ${isChecked ? "#10b981" : "rgba(255,255,255,0.07)"}`,
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                      minWidth: 0,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => {}}
+                      style={{ marginTop: 2, cursor: "pointer", accentColor: "#10b981", transform: "scale(1.15)" }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{
+                        margin: "0 0 6px",
+                        fontSize: "0.84rem",
+                        lineHeight: 1.45,
+                        color: isChecked ? "#6ee7b7" : "inherit",
+                        wordBreak: "break-word",
+                        overflowWrap: "anywhere",
+                      }}>
+                        {f.statement}
+                      </p>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <span className="chip" style={{ fontSize: "0.68rem", padding: "2px 8px", background: "rgba(255,255,255,0.04)" }}>
+                          {f.section.replace(/_/g, " ")}
+                        </span>
+                        <span className="muted" style={{ fontSize: "0.7rem" }}>
+                          {Math.round(f.confidence * 100)}% confidence
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Live Session Audit Stream */}
+          <div style={{ background: "#090d16", border: "1px solid #1e293b", borderRadius: 12, padding: 14, minWidth: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <strong style={{ fontSize: "0.78rem", color: "#94a3b8", display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
+                Real-Time Audit Stream
+              </strong>
+              <span className="muted" style={{ fontSize: "0.7rem" }}>{auditLogs.length} events logged</span>
+            </div>
+            <div style={{ maxHeight: 110, overflowY: "auto", fontSize: "0.75rem", display: "flex", flexDirection: "column", gap: 5 }}>
               {auditLogs.map((log, i) => (
-                <div key={i} style={{ color: "#38bdf8" }}>
+                <div key={i} style={{ color: "#38bdf8", wordBreak: "break-word", overflowWrap: "anywhere" }}>
                   <span style={{ color: "#64748b" }}>[{log.ts}]</span> {log.event}
                 </div>
               ))}
             </div>
           </div>
         </div>
-
-        {/* Right Side: Cart & Guest Checkout */}
-        <div className="kiosk-cart-panel">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <strong style={{ fontSize: "0.92rem" }}>🛒 Shopper Basket ({cart.reduce((a, b) => a + b.qty, 0)})</strong>
-            <button
-              type="button"
-              className="btn ghost"
-              style={{ fontSize: "0.75rem", padding: "2px 6px", color: "#f43f5e" }}
-              onClick={() => setOverrideModal(true)}
-              title="Trigger store manager 2FA authorization"
-            >
-              🔒 2FA Override
-            </button>
-          </div>
-
-          <div style={{ flex: 1, minHeight: 140, maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
-            {cart.length === 0 ? (
-              <p className="muted" style={{ textAlign: "center", margin: "auto", fontSize: "0.82rem" }}>
-                Basket is empty. Tap any item to scan.
-              </p>
-            ) : (
-              cart.map((item) => (
-                <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1e293b", padding: "6px 10px", borderRadius: 8 }}>
-                  <span style={{ fontSize: "0.82rem" }}>{item.name} × {item.qty}</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <strong style={{ fontSize: "0.85rem", color: "#34d399" }}>${(item.price * item.qty).toFixed(2)}</strong>
-                    <button type="button" className="file-remove-btn" onClick={() => removeItem(item.id)}>✕</button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div style={{ borderTop: "1px solid #334155", paddingTop: 10, marginTop: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", color: "#94a3b8" }}>
-              <span>Subtotal</span>
-              <span>${subtotal.toFixed(2)}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", color: "#94a3b8", marginTop: 2 }}>
-              <span>Sales Tax (8%)</span>
-              <span>${tax.toFixed(2)}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "1rem", fontWeight: 700, marginTop: 4 }}>
-              <span>Total</span>
-              <span style={{ color: "#38bdf8" }}>${total.toFixed(2)}</span>
-            </div>
-
-            {offlineMode && (
-              <div style={{ background: "rgba(245, 158, 11, 0.15)", border: "1px solid #f59e0b", borderRadius: 6, padding: "4px 8px", marginTop: 8, fontSize: "0.75rem", color: "#fbbf24" }}>
-                Offline Buffer: {offlineQueue}/50 Baskets Queued
-              </div>
-            )}
-
-            <button
-              type="button"
-              className="btn primary"
-              style={{ width: "100%", marginTop: 10, padding: "10px 0", fontWeight: 700 }}
-              disabled={cart.length === 0}
-              onClick={handleGuestCheckout}
-            >
-              💳 Complete Guest Checkout
-            </button>
-          </div>
-        </div>
       </div>
-
-      {paidReceipt && (
-        <div style={{ marginTop: 14, background: "rgba(16, 185, 129, 0.15)", border: "1px solid #10b981", borderRadius: 12, padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <strong style={{ color: "#34d399" }}>✓ Transaction Approved ({paidReceipt.id})</strong>
-            <p className="muted" style={{ margin: "2px 0 0", fontSize: "0.8rem" }}>
-              {paidReceipt.itemsCount} items · ${paidReceipt.total.toFixed(2)} USD · {paidReceipt.offline ? "Queued in Local SQLite" : "Sent to GCP Gateway"}
-            </p>
-          </div>
-          <button type="button" className="btn ghost" style={{ fontSize: "0.78rem" }} onClick={() => setPaidReceipt(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
 
       {overrideModal && (
         <div className="auth-overlay">
-          <div className="auth-card" style={{ maxWidth: 360 }}>
-            <h4 style={{ margin: "0 0 6px" }}>🔒 Manager 2FA Biometric / PIN Challenge</h4>
+          <div className="auth-card" style={{ maxWidth: 380 }}>
+            <h4 style={{ margin: "0 0 6px" }}>🔒 Security Verification Challenge</h4>
             <p className="muted" style={{ fontSize: "0.8rem", margin: "0 0 12px" }}>
-              Enforcing Elena Rostova's security mandate for elevated store overrides.
+              {thresholdRule ? thresholdRule.statement : "Mandatory verification required for elevated transaction."}
             </p>
             <input
               type="password"
-              placeholder="Enter PIN (Demo: 4829)"
+              placeholder="Enter PIN (e.g. 1234)"
               value={overridePin}
               onChange={(e) => setOverridePin(e.target.value)}
               style={{ marginBottom: 10 }}
@@ -960,31 +1108,35 @@ function GherkinTestCases({ sessionId }) {
     }
   }
 
-  function simulateTestRunner() {
-    setRunningSim(true);
-    setTimeout(() => {
-      setRunningSim(false);
-      alert("✓ Test Suite Execution Complete! 100% of scenarios passed across all acceptance criteria.");
-    }, 1500);
+  // Download the scenarios as a real .feature file that QA tools (Cucumber, Behave, Playwright-BDD) can run
+  function downloadFeatureFile() {
+    const content = testCases.map((tc) => `# ${tc.id} — source: ${tc.requirement_statement}\n${tc.gherkin}`).join("\n\n");
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "orbius-acceptance-tests.feature";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
     <div className="gherkin-container">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
         <div>
-          <h3 style={{ margin: "0 0 2px" }}>🧪 Automated Gherkin Test Suite & Backlog</h3>
+          <h3 style={{ margin: "0 0 2px" }}>🧪 Acceptance Tests (Gherkin)</h3>
           <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
-            Auto-generated acceptance criteria with Given / When / Then linked directly to source findings.
+            Plain-English Given / When / Then checks, one for each requirement found in your files.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button
             type="button"
             className="btn primary"
-            disabled={runningSim || testCases.length === 0}
-            onClick={simulateTestRunner}
+            disabled={testCases.length === 0}
+            onClick={downloadFeatureFile}
           >
-            {runningSim ? "Running Test Suite..." : "▶️ Run Test Suite Simulation"}
+            ⬇️ Download .feature file
           </button>
         </div>
       </div>
@@ -1022,8 +1174,8 @@ function GherkinTestCases({ sessionId }) {
                     {testCases[activeTab].name}
                   </p>
                 </div>
-                <span className="chip" style={{ background: "rgba(16, 185, 129, 0.2)", color: "#34d399" }}>
-                  ✓ {testCases[activeTab].status.toUpperCase()} ({testCases[activeTab].execution_ms}ms)
+                <span className="chip" style={{ background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8" }}>
+                  Ready to run · {testCases[activeTab].coverage}
                 </span>
               </div>
 
@@ -1045,8 +1197,8 @@ function GherkinTestCases({ sessionId }) {
 // ==========================================
 function ImpactRippleGraph({ sessionId }) {
   const [graphData, setGraphData] = useState(null);
-  const [selectedSim, setSelectedSim] = useState("sim_delay_api");
-  const [pulsingNodes, setPulsingNodes] = useState(["node_ai", "node_offline", "node_q3", "node_budget"]);
+  const [selectedSim, setSelectedSim] = useState(null);
+  const [pulsingNodes, setPulsingNodes] = useState([]);
 
   useEffect(() => {
     jsonFetch(`/api/session/${sessionId}/ripple-graph`)
@@ -1095,6 +1247,12 @@ function ImpactRippleGraph({ sessionId }) {
         </div>
       )}
 
+      {graphData && (graphData.nodes || []).length === 0 && (
+        <div className="card" style={{ textAlign: "center", padding: 24 }}>
+          <p className="muted" style={{ margin: 0 }}>Generate a BRD first — the graph is built only from your uploaded files.</p>
+        </div>
+      )}
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 18, background: "#060913", borderRadius: 14, border: "1px solid #1e293b" }}>
         {graphData?.nodes?.map((node) => {
           const isPulsing = pulsingNodes.includes(node.id);
@@ -1121,18 +1279,24 @@ function ImpactRippleGraph({ sessionId }) {
 // ==========================================
 // FEATURE: Replayable Multi-Agent Decision Trace
 // ==========================================
-function DecisionTraceTimeline({ events, router }) {
+function DecisionTraceTimeline({ events, router, state }) {
   const [activeStep, setActiveStep] = useState(0);
 
+  // Every detail below is computed from the current session (no demo text)
+  const findings = state?.findings || [];
+  const chunks = state?.chunks || [];
+  const files = [...new Set(chunks.map((c) => c.file_name))];
+  const count = (pred) => findings.filter(pred).length;
+  const conflicts = state?.conflicts || [];
   const steps = [
-    { name: "1. Multi-Modal Ingestion", model: "Local IO", status: "Completed", detail: "Parsed text, emails, PDFs, sheets, audio, and wireframe PNGs." },
-    { name: "2. Multi-Model Router", model: router?.active_model || "gemini-3.8-flash", status: "Active", detail: "Evaluated budget/quota ceilings and selected primary routing." },
-    { name: "3. Text Specialist Agent", model: "Specialist L1", status: "Extracted", detail: "Extracted 30% checkout reduction, guest checkout, and 2FA mandates." },
-    { name: "4. Vision & Wireframe Agent", model: "Vision Specialist", status: "Extracted", detail: "Identified terminal screen layouts, scanning angles, and supervisor UI." },
-    { name: "5. Document & Budget Agent", model: "Finance Specialist", status: "Extracted", detail: "Locked $180,000 budget cap and GCP cloud inference allocations." },
-    { name: "6. Validator & Noise Filter", model: "Validator L2", status: "Verified", detail: "Filtered conversational filler and dropped ungrounded statements." },
-    { name: "7. Conflict Resolver", model: "Conflict Engine", status: "Resolved", detail: "Detected and flagged Q3 launch window vs October store staffing." },
-    { name: "8. Living BRD & Artifact Exports", model: "Orchestrator", status: "Delivered", detail: "Rendered interactive Mermaid diagrams, Jira CSV, and Linear JSON." },
+    { name: "1. File Ingestion", model: "Local IO", status: "Completed", detail: files.length ? `Read ${files.length} file(s): ${files.join(", ")} (${chunks.length} text blocks).` : "No files uploaded yet." },
+    { name: "2. Model Router", model: router?.active_model || "—", status: "Active", detail: "Selected the AI model used for extraction." },
+    { name: "3. Requirements Extraction", model: "Specialist L1", status: "Extracted", detail: `${count((f) => ["functional_requirements", "non_functional_requirements", "objectives", "scope"].includes(f.section))} requirement(s) found.` },
+    { name: "4. Stakeholder Detection", model: "Specialist L1", status: "Extracted", detail: `${count((f) => f.section === "stakeholders")} stakeholder(s) found.` },
+    { name: "5. Budget Extraction", model: "Finance Specialist", status: "Extracted", detail: `${count((f) => f.section === "budget")} budget item(s) found.` },
+    { name: "6. Validator & Noise Filter", model: "Validator L2", status: "Verified", detail: `${findings.length} finding(s) kept after grounding checks; ${(state?.gaps || []).length} flagged as gaps.` },
+    { name: "7. Conflict Check", model: "Conflict Engine", status: conflicts.length ? "Flagged" : "Clear", detail: conflicts.length ? conflicts.map((c) => c.topic).join(", ") : "No conflicting statements between your sources." },
+    { name: "8. BRD & Exports", model: "Orchestrator", status: "Delivered", detail: "Built the BRD, diagrams, test suite and export files from the findings above." },
   ];
 
   return (
@@ -1174,24 +1338,26 @@ function DecisionTraceTimeline({ events, router }) {
 // ==========================================
 // FEATURE: Live Meeting Mode & Conflict Interrupter
 // ==========================================
-function LiveMeetingMode({ onNewFinding }) {
+function LiveMeetingMode({ sessionId, onNewFinding }) {
   const [meetingTranscript, setMeetingTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [interruptAlert, setInterruptAlert] = useState(null);
   const recognitionRef = useRef(null);
+  const [sampleTriggers, setSampleTriggers] = useState([]);
 
-  const sampleTriggers = [
-    { label: "Trigger: Propose Q4 Launch", phrase: "Let's push the launch date to Q4 because stores won't be staffed before October." },
-    { label: "Trigger: Exceed Budget ($250k)", phrase: "We need to spend $250k to procure the specialized displays." },
-    { label: "Trigger: Skip 2FA Overrides", phrase: "To speed up cashier workflows, let's skip 2FA and use simple passwords." },
-  ];
+  // Test phrases are generated from YOUR findings (no demo data)
+  useEffect(() => {
+    jsonFetch(`/api/session/${sessionId}/meeting-triggers`)
+      .then((d) => setSampleTriggers(d.triggers || []))
+      .catch(() => setSampleTriggers([]));
+  }, [sessionId]);
 
   async function checkInterruption(text) {
     try {
       const res = await jsonFetch("/api/meeting/interrupter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ speech: text }),
+        body: JSON.stringify({ speech: text, session_id: sessionId }),
       });
       if (res.interrupted) {
         setInterruptAlert(res);
@@ -1218,6 +1384,11 @@ function LiveMeetingMode({ onNewFinding }) {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {sampleTriggers.length === 0 && (
+          <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
+            Generate a BRD first — test phrases will be created from your own requirements, budget and deadlines.
+          </p>
+        )}
         {sampleTriggers.map((t, idx) => (
           <button
             key={idx}
@@ -1960,25 +2131,25 @@ export default function App() {
                 {running ? (
                   <>
                     <span className="vault-pulse" style={{ background: "#1a0f14" }} />
-                    Agents Executing Swarm…
+                    Analyzing Documents & Extracting…
                   </>
                 ) : (
                   <>
-                    ⚡ Launch Multi-Agent Swarm
+                    ⚡ Analyze & Generate BRD
                   </>
                 )}
               </button>
             </div>
 
-            {/* Telemetry & Agent Delegation Trace */}
+            {/* Analysis Activity Log & Agent Progress */}
             <div className="swarm-telemetry-header">
               <h3>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pink-deep)" }}>
                   <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
                 </svg>
-                Swarm Telemetry
+                Live Analysis Activity
               </h3>
-              <span className="muted" style={{ fontSize: "0.72rem" }}>Real-time Trace</span>
+              <span className="muted" style={{ fontSize: "0.72rem" }}>Agent Progress</span>
             </div>
 
             <div className="trace">
@@ -1986,7 +2157,7 @@ export default function App() {
                 <div className="trace-item" key={i}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span className="trace-level-tag">L{ev.level}</span>
-                    <strong style={{ fontSize: "0.8rem", color: "var(--ink)" }}>{ev.agent}</strong>
+                    <strong style={{ fontSize: "0.8rem", color: "var(--ink)" }}>{formatAgentName(ev.agent)}</strong>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span className="muted" style={{ fontSize: "0.74rem" }}>{ev.task}</span>
@@ -2065,9 +2236,9 @@ export default function App() {
             ) : studioCenterTab === "ripple" ? (
               <ImpactRippleGraph sessionId={SESSION} />
             ) : studioCenterTab === "meeting" ? (
-              <LiveMeetingMode onNewFinding={() => { }} />
+              <LiveMeetingMode sessionId={SESSION} onNewFinding={() => { }} />
             ) : studioCenterTab === "trace" ? (
-              <DecisionTraceTimeline events={state?.events || events} router={router} />
+              <DecisionTraceTimeline events={state?.events || events} router={router} state={state} />
             ) : (
               /* Default BRD Document View */
               <div>
@@ -2113,10 +2284,10 @@ export default function App() {
                           {c.status === "open" && (
                             <div className="row">
                               <button className="btn" onClick={() => resolveConflict(c.id, "left")}>
-                                Keep Q3
+                                Keep Source A
                               </button>
                               <button className="btn primary" onClick={() => resolveConflict(c.id, "right")}>
-                                Keep Q4
+                                Keep Source B
                               </button>
                             </div>
                           )}
@@ -2515,7 +2686,7 @@ export default function App() {
           <strong>Evidence & Source Chunk</strong>
           <p>{evidence.finding?.statement}</p>
           <p className="muted">
-            {evidence.finding?.agent} · confidence {Math.round((evidence.finding?.confidence || 0) * 100)}%
+            {formatAgentName(evidence.finding?.agent)} · confidence {Math.round((evidence.finding?.confidence || 0) * 100)}%
           </p>
           <p>
             {evidence.chunk?.file_name} · {evidence.chunk?.page_or_ts}

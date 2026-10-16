@@ -4,7 +4,7 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, Header, UploadFile
+from fastapi import FastAPI, File, Form, Header, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
@@ -44,7 +44,7 @@ db.init_db()
 UPLOADS: dict[str, list] = {}
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health():
     return {"ok": True, "name": "Orbius", "now": get_now().isoformat()}
 
@@ -148,7 +148,13 @@ def router_sim(on: bool = True):
 
 
 @app.post("/api/upload")
-async def upload(files: list[UploadFile] = File(...), session_id: str = Form("demo"), x_user_id: str | None = Header(None)):
+async def upload(
+    files: list[UploadFile] = File(...),
+    session_id: str = Form("demo"),
+    session_id_query: str | None = Query(None, alias="session_id"),
+    x_user_id: str | None = Header(None),
+):
+    session_id = session_id_query if session_id_query and session_id == "demo" else session_id
     existing = UPLOADS.get(session_id, [])
     dest_dir = settings.upload_dir / session_id
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -495,23 +501,53 @@ def get_scorecard():
 
 @app.post("/api/meeting/interrupter")
 def meeting_interrupter(payload: dict):
-    speech = payload.get("speech", "").lower()
+    """Flags live speech that contradicts findings extracted from the user's uploaded files."""
+    import re as _re
+    from app.prototype_agent import parse_money, _is_budget, _is_deadline, _short, THRESHOLD_RE
+
+    raw_speech = payload.get("speech", "")
+    speech = raw_speech.lower()
+    session_id = payload.get("session_id") or "demo"
+    state = SESSIONS.get(session_id) or db.load_session(session_id) or {}
+    findings = [Finding.model_validate(f) for f in state.get("findings", [])]
+
     interrupted = False
     interruption_reason = ""
     suggested_correction = ""
 
-    if "q4" in speech or "october" in speech or "november" in speech or "delay launch" in speech:
-        interrupted = True
-        interruption_reason = "⚠️ CONFLICT DETECTED: Speaker proposed Q4 launch window, which directly contradicts Priya Mehta's Q3 locked commitment!"
-        suggested_correction = "Ask: 'Priya locked Q3 in the kickoff memo — do we have sign-off to shift the target to October/Q4?'"
-    elif "200k" in speech or "250k" in speech or "over budget" in speech or "300,000" in speech:
-        interrupted = True
-        interruption_reason = "⚠️ BUDGET CAP EXCEEDED: Proposed spending exceeds Marcus Chen's strict $180,000 ceiling!"
-        suggested_correction = "Ask: 'Marcus Chen capped total budget at $180k. Where is the additional funding sourced from?'"
-    elif "no 2fa" in speech or "skip 2fa" in speech or "simple password" in speech:
-        interrupted = True
-        interruption_reason = "⚠️ SECURITY VIOLATION: Bypassing 2FA violates Elena Rostova's architectural & PCI-DSS mandate!"
-        suggested_correction = "Enforce: Store manager overrides must require mandatory 2FA biometric or mobile PIN verification."
+    # 1) Budget: spoken amount larger than a budget limit found in the files
+    spoken_amounts = parse_money(raw_speech)
+    for f in findings:
+        if not spoken_amounts or not _is_budget(f):
+            continue
+        cap = max(parse_money(f.statement))
+        if max(spoken_amounts) > cap:
+            interrupted = True
+            interruption_reason = f"⚠️ OVER BUDGET: ${max(spoken_amounts):,.0f} is more than the ${cap:,.0f} limit in your files."
+            suggested_correction = f"Your source says: \"{f.statement}\". Ask where the extra funding would come from."
+            break
+
+    # 2) Requirement being skipped / removed
+    if not interrupted and _re.search(r"\b(skip|no|remove|drop|bypass|without|ignore|cancel|don't need|not needed)\b", speech):
+        stop = {"must", "should", "will", "with", "that", "this", "from", "have", "require", "required", "the", "and", "for", "above"}
+        for f in findings:
+            if f.type == "stakeholder" or not _re.search(r"\b(must|mandatory|required|require|shall|need)\b", f.statement.lower()):
+                continue
+            keywords = [w for w in _re.findall(r"[a-z0-9]{3,}", f.statement.lower()) if w not in stop]
+            hit = next((k for k in keywords if _re.search(rf"\b{_re.escape(k)}\b", speech)), None)
+            if hit:
+                interrupted = True
+                interruption_reason = f"⚠️ CONFLICTS WITH A REQUIREMENT: skipping \"{hit}\" goes against your files."
+                suggested_correction = f"Your source says: \"{f.statement}\"."
+                break
+
+    # 3) Deadline being pushed
+    if not interrupted and _re.search(r"\b(delay|postpone|push|later|next week|extend|move the deadline|reschedule)\b", speech):
+        f = next((x for x in findings if _is_deadline(x)), None)
+        if f:
+            interrupted = True
+            interruption_reason = "⚠️ DEADLINE AT RISK: this would move a date stated in your files."
+            suggested_correction = f"Your source says: \"{f.statement}\". Confirm with the requester before changing it."
 
     return {
         "interrupted": interrupted,
@@ -519,6 +555,30 @@ def meeting_interrupter(payload: dict):
         "suggested_correction": suggested_correction,
         "live_timestamp": get_now().isoformat()
     }
+
+
+@app.get("/api/session/{session_id}/meeting-triggers")
+def meeting_triggers(session_id: str):
+    """Sample test phrases generated from the user's own findings (no demo data)."""
+    import re as _re
+    from app.prototype_agent import parse_money, _is_budget, _is_deadline, _short
+
+    state = SESSIONS.get(session_id) or db.load_session(session_id) or {}
+    findings = [Finding.model_validate(f) for f in state.get("findings", [])]
+    triggers = []
+    budget = next((f for f in findings if _is_budget(f)), None)
+    if budget:
+        over = max(parse_money(budget.statement)) * 1.4
+        triggers.append({"label": "Exceed the budget", "phrase": f"I think we should spend ${over:,.0f} on this."})
+    req = next((f for f in findings if f.type != "stakeholder" and _re.search(r"\b(must|mandatory|required|require)\b", f.statement.lower())), None)
+    if req:
+        words = [w for w in _re.findall(r"[A-Za-z0-9]{3,}", req.statement) if w.lower() not in {"must", "require", "required", "mandatory", "store", "the", "for", "with"}]
+        key = next((w for w in words if any(ch.isdigit() for ch in w) or w.isupper()), words[0] if words else "this")
+        triggers.append({"label": f"Skip: {_short(req.statement, 5)}", "phrase": f"To save time, let's skip {key} for now."})
+    dl = next((f for f in findings if _is_deadline(f)), None)
+    if dl:
+        triggers.append({"label": f"Delay: {_short(dl.statement, 5)}", "phrase": "Let's postpone this until next week."})
+    return {"triggers": triggers}
 
 
 @app.get("/api/download-test-pack")
@@ -539,6 +599,6 @@ def download_test_pack():
     return JSONResponse({"error": "Dataset zip not found"}, status_code=404)
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"service": "orbius-api", "docs": "/docs"}

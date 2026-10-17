@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import mermaid from "mermaid";
+import ActionCenter from "./components/ActionCenter";
+import AnalysisTrace from "./components/AnalysisTrace";
+import EvidenceInspector from "./components/EvidenceInspector";
+import FragmentConvergence from "./components/FragmentConvergence";
+import Icon from "./components/Icon";
+import RequirementsDocument from "./components/RequirementsDocument";
+import SourceVault from "./components/SourceVault";
+import { formatAgentName } from "./components/agentNames";
 
 const SESSION = "demo";
 
@@ -22,6 +30,42 @@ function useTheme() {
     });
   }, [theme]);
   return [theme, setTheme];
+}
+
+function routingStatusLabel(router) {
+  const latestEvent = router?.log?.at(-1)?.event;
+  if (latestEvent === "offline_demo") return "Offline heuristic";
+  if (!router?.active_model) return "Route not reported";
+  return router.fallback ? "Fallback route" : "Reported route";
+}
+
+function ScrollReveal({ as: Element = "div", className = "", children, ...props }) {
+  const revealRef = useRef(null);
+
+  useEffect(() => {
+    const element = revealRef.current;
+    if (!element) return undefined;
+    if (!("IntersectionObserver" in window)) {
+      element.classList.add("is-visible");
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        element.classList.add("is-visible");
+        observer.unobserve(element);
+      }
+    }, { threshold: 0.16, rootMargin: "0px 0px -32px 0px" });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <Element ref={revealRef} className={`story-reveal ${className}`.trim()} {...props}>
+      {children}
+    </Element>
+  );
 }
 
 async function jsonFetch(url, options = {}) {
@@ -53,156 +97,6 @@ async function jsonFetch(url, options = {}) {
     }
     throw err;
   }
-}
-
-const AGENT_FRIENDLY_NAMES = {
-  text_agent: "Requirements Analyst",
-  budget_agent: "Finance & Budget Specialist",
-  risk_agent: "Compliance & Risk Auditor",
-  ops_agent: "Operations & Action Planner",
-  vision_agent: "UI & Wireframe Specialist",
-  document_agent: "Document & Data Parser",
-  validator_agent: "Consensus Validator",
-  diagram_agent: "Architecture Specialist",
-};
-
-function formatAgentName(name) {
-  if (!name) return "AI Specialist";
-  return AGENT_FRIENDLY_NAMES[name] || name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-// ==========================================
-// FEATURE 1: Interactive Mermaid Diagram
-// ==========================================
-function MermaidViewer({ section, findings, chunks }) {
-  const [activeTab, setActiveTab] = useState("architecture");
-  const [svgContent, setSvgContent] = useState("");
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const containerRef = useRef(null);
-
-  const diagrams = useMemo(() => {
-    function cleanLabel(s, words = 6) {
-      const clean = (s || "").replace(/["'`<>[\]{}()|#;:]/g, " ").replace(/\s+/g, " ").trim();
-      const parts = clean.split(" ");
-      return parts.slice(0, words).join(" ") + (parts.length > words ? "..." : "");
-    }
-
-    const people = (findings || [])
-      .filter((f) => f.type === "stakeholder" || f.section === "stakeholders")
-      .map((f) => cleanLabel(f.statement, 4));
-    const items = (findings || [])
-      .filter((f) => f.type !== "stakeholder" && f.section !== "stakeholders")
-      .slice(0, 6);
-
-    const defaultArch = section.mermaid_code || `graph TD
-    classDef primary fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#1e293b;
-    classDef person fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#1e293b;
-    classDef item fill:#fef3c7,stroke:#d97706,stroke-width:1px,color:#1e293b;
-
-    P0["Project Scope"]:::primary
-    ${people.map((p, i) => `S${i}["👤 ${p}"]:::person --> P0`).join("\n    ")}
-    ${items.map((it, i) => `P0 --> R${i}["📋 ${cleanLabel(it.statement, 5)}"]:::item`).join("\n    ")}`;
-
-    const defaultUserFlow = section.user_flow_code || `flowchart LR
-    classDef step fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#1e293b;
-    classDef finish fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#1e293b;
-
-    Start([Start]):::step
-    ${items.length > 0 ? items.map((it, i) => `${i === 0 ? "Start" : `F${i - 1}`} --> F${i}["${cleanLabel(it.statement, 5)}"]:::step`).join("\n    ") : "Start --> Process[Process Requirements]:::step"}
-    ${items.length > 0 ? `F${items.length - 1} --> Done([Complete]):::finish` : "Process --> Done([Complete]):::finish"}`;
-
-    const requester = people[0] || "Stakeholder";
-    const defaultSeq = section.sequence_code || `sequenceDiagram
-    autonumber
-    actor User as ${requester}
-    participant System as System Gateway
-    participant Team as Execution Team
-
-    User->>System: Submit Requirements & Directives
-    ${items.slice(0, 3).map((it) => `System->>Team: Enforce: ${cleanLabel(it.statement, 6)}`).join("\n    ")}
-    Team-->>User: Verification Complete & Artifacts Generated`;
-
-    return {
-      architecture: section.mermaid_code || defaultArch,
-      user_flow: section.user_flow_code || defaultUserFlow,
-      sequence: section.sequence_code || defaultSeq,
-    };
-  }, [section, findings]);
-
-  useEffect(() => {
-    let isMounted = true;
-    async function renderMermaid() {
-      const code = diagrams[activeTab] || diagrams.architecture;
-      const id = `mermaid-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      try {
-        const { svg } = await mermaid.render(id, code);
-        if (isMounted) setSvgContent(svg);
-      } catch (e) {
-        console.error("Mermaid render error:", e);
-        if (isMounted) {
-          setSvgContent(`<div style="padding: 14px; color: var(--muted); font-size: 0.85rem;">Rendering diagram...</div>`);
-        }
-      }
-    }
-    renderMermaid();
-    return () => { isMounted = false; };
-  }, [activeTab, diagrams]);
-
-  return (
-    <div className={`mermaid-card ${isFullscreen ? "fullscreen" : ""}`}>
-      <div className="mermaid-header">
-        <div className="diagram-tabs">
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "architecture" ? "active" : ""}`}
-            onClick={() => setActiveTab("architecture")}
-          >
-            🏗️ Architecture
-          </button>
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "user_flow" ? "active" : ""}`}
-            onClick={() => setActiveTab("user_flow")}
-          >
-            🔄 User Flow
-          </button>
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "sequence" ? "active" : ""}`}
-            onClick={() => setActiveTab("sequence")}
-          >
-            ⚡ Sequence Flow
-          </button>
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="btn ghost"
-            style={{ padding: "3px 8px", fontSize: "0.75rem" }}
-            onClick={() => {
-              navigator.clipboard.writeText(diagrams[activeTab]);
-              alert("Copied Mermaid code to clipboard!");
-            }}
-          >
-            Copy Code
-          </button>
-          <button
-            type="button"
-            className="btn ghost"
-            style={{ padding: "3px 8px", fontSize: "0.75rem" }}
-            onClick={() => setIsFullscreen(!isFullscreen)}
-          >
-            {isFullscreen ? "Exit Fullscreen" : "⛶ Expand"}
-          </button>
-        </div>
-      </div>
-      <div
-        className="mermaid-viewport"
-        ref={containerRef}
-        dangerouslySetInnerHTML={{ __html: svgContent }}
-      />
-    </div>
-  );
 }
 
 // ==========================================
@@ -332,10 +226,11 @@ function VoiceRecorder({ onAudioRecorded }) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const barWidth = (canvas.width / 16) - 2;
+      const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
       let x = 0;
       for (let i = 0; i < 16; i++) {
         const barHeight = (dataArray[i * 2] / 255) * canvas.height * 0.9 + 2;
-        ctx.fillStyle = "rgba(255, 117, 151, 0.85)";
+        ctx.fillStyle = accentColor;
         ctx.beginPath();
         ctx.roundRect(x, canvas.height - barHeight, barWidth, barHeight, 3);
         ctx.fill();
@@ -360,7 +255,8 @@ function VoiceRecorder({ onAudioRecorded }) {
           onClick={startRecording}
           title="Record a live meeting or voice note to extract requirements"
         >
-          <span>🎙️ Record Voice Note / Meeting</span>
+          <Icon name="microphone" size={16} />
+          <span>Record voice note / meeting</span>
         </button>
       ) : (
         <div>
@@ -389,11 +285,11 @@ function VoiceRecorder({ onAudioRecorded }) {
 // ==========================================
 // FEATURE 2: Chat with BRD Copilot Drawer
 // ==========================================
-function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
+function CopilotDrawer({ isOpen, onClose, onOpenEvidence, sourceChunks = [] }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      content: "👋 Hello! I am your **Orbius BRD Copilot**. Ask me anything about your project requirements, scope trade-offs, budget constraints, or ask me to draft stakeholder updates.",
+      content: "Hello! I am your **Orbius BRD Copilot**. Ask about project requirements, scope trade-offs, budget constraints, or stakeholder updates.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -405,10 +301,31 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
     "Draft a reply email to the sender",
   ]);
   const chatEndRef = useRef(null);
+  const chatInputRef = useRef(null);
+  const closeHandlerRef = useRef(onClose);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    closeHandlerRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    chatEndRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const previouslyFocused = document.activeElement;
+    chatInputRef.current?.focus({ preventScroll: true });
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") closeHandlerRef.current();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, [isOpen]);
 
   async function handleSend(textToSend) {
     const text = textToSend || input;
@@ -445,7 +362,7 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
         ...prev,
         {
           role: "assistant",
-          content: `⚠️ Error fetching answer: ${err.message}`,
+          content: `Error fetching answer: ${err.message}`,
         },
       ]);
     } finally {
@@ -456,14 +373,14 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
   if (!isOpen) return null;
 
   return (
-    <div className="copilot-drawer">
+    <section className="copilot-drawer" role="dialog" aria-label="BRD Copilot">
       <div className="copilot-header">
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: "1.2rem" }}>💬</span>
+          <Icon name="message" size={19} />
           <strong>BRD Copilot</strong>
-          <span className="chip" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>Grounded AI</span>
+          <span className="chip" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>Project assistant</span>
         </div>
-        <button type="button" className="btn ghost" style={{ padding: "4px 8px" }} onClick={onClose}>
+        <button type="button" className="btn ghost" style={{ padding: "4px 8px" }} onClick={onClose} aria-label="Close Copilot">
           ✕
         </button>
       </div>
@@ -474,20 +391,33 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
             <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{m.content}</div>
             {m.citations && m.citations.length > 0 && (
               <div className="citations-container">
-                <span className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: 4 }}>
-                  Verified Citations:
+                <span className="muted copilot-reference-note">
+                  Copilot references · source match does not verify relevance
                 </span>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                  {m.citations.map((c, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      className="citation-chip"
-                      onClick={() => onOpenEvidence(c)}
-                    >
-                      📎 {c.file_name || c.source_id}
-                    </button>
-                  ))}
+                  {m.citations.map((citation, i) => {
+                    const source = sourceChunks.find((chunk) =>
+                      (citation?.source_id && chunk.source_id === citation.source_id) ||
+                      (citation?.file_name && chunk.file_name === citation.file_name),
+                    );
+                    const label = source?.file_name || source?.source_id ||
+                      citation?.file_name || citation?.source_id || "Reference without source details";
+
+                    return (
+                      <button
+                        key={`${citation?.source_id || citation?.file_name || "reference"}-${i}`}
+                        type="button"
+                        className="citation-chip"
+                        disabled={!source}
+                        title={source
+                          ? "Matched to a source in this workspace; relevance to the answer is unverified."
+                          : "This reference does not match a source currently loaded in this workspace."}
+                        onClick={() => source && onOpenEvidence(citation, source)}
+                      >
+                        {label}{!source && " · unmatched"}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -517,6 +447,7 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
         }}
       >
         <input
+          ref={chatInputRef}
           type="text"
           placeholder="Ask a question about your project..."
           value={input}
@@ -526,7 +457,7 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
           Send
         </button>
       </form>
-    </div>
+    </section>
   );
 }
 
@@ -541,10 +472,10 @@ function ScenarioSimulatorModal({ isOpen, onClose }) {
   const [diffSvg, setDiffSvg] = useState("");
 
   const presets = [
-    { id: "budget_cut_30", label: "📉 Budget Cut 30%", desc: "What if the budget shrinks?" },
-    { id: "launch_accelerated", label: "⏩ Deliver 6 Weeks Early", desc: "What if deadlines move earlier?" },
-    { id: "drop_tablet_scope", label: "✂️ Must-Haves Only", desc: "Keep only mandatory items" },
-    { id: "strict_security_wcag", label: "🔒 Stricter Security", desc: "Raise security & compliance rules" },
+    { id: "budget_cut_30", label: "Budget cut 30%", desc: "What if the budget shrinks?" },
+    { id: "launch_accelerated", label: "Deliver 6 weeks early", desc: "What if deadlines move earlier?" },
+    { id: "drop_tablet_scope", label: "Must-haves only", desc: "Keep only mandatory items" },
+    { id: "strict_security_wcag", label: "Stricter security", desc: "Raise security & compliance rules" },
   ];
 
   async function runSimulation(type) {
@@ -578,15 +509,15 @@ function ScenarioSimulatorModal({ isOpen, onClose }) {
 
   return (
     <div className="auth-overlay">
-      <div className="auth-card scenario-modal">
+      <div className="auth-card scenario-modal" role="dialog" aria-modal="true" aria-labelledby="scenario-modal-title">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
-            <h3 style={{ margin: "0 0 4px" }}>⚡ Live "What-If" Scenario Simulator</h3>
+            <h3 id="scenario-modal-title" style={{ margin: "0 0 4px" }}>What-if scenario simulator</h3>
             <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
               Explore cascading downstream impacts on requirements, milestones, and risks.
             </p>
           </div>
-          <button type="button" className="btn ghost" onClick={onClose}>✕</button>
+          <button type="button" className="btn ghost" data-modal-initial-focus onClick={onClose} aria-label="Close scenario simulator">✕</button>
         </div>
 
         <div className="scenario-presets">
@@ -721,7 +652,7 @@ function InteractivePrototype({ findings, chunks }) {
   const [verifiedList, setVerifiedList] = useState({});
   const [actionDispatched, setActionDispatched] = useState(false);
   const [auditLogs, setAuditLogs] = useState(() => [
-    { ts: new Date().toISOString().slice(11, 19) + " UTC", event: "Prototype initialized from verified BRD findings" },
+    { ts: new Date().toISOString().slice(11, 19) + " UTC", event: "Prototype initialized from current BRD findings; not independently verified" },
   ]);
 
   if (!findings || findings.length === 0) {
@@ -739,9 +670,9 @@ function InteractivePrototype({ findings, chunks }) {
 
   function handleVerifyOverride() {
     if (overridePin.length >= 4) {
-      setOverrideMessage({ ok: true, text: "✓ 2FA Verified. Elevated action approved." });
+      setOverrideMessage({ ok: true, text: "✓ Prototype simulation passed. No real authentication was performed." });
       setAuditLogs((prev) => [
-        { ts: new Date().toISOString().slice(11, 19) + " UTC", event: `2FA Approved for $${testAmount.toLocaleString()} transaction` },
+        { ts: new Date().toISOString().slice(11, 19) + " UTC", event: `2FA simulation passed for $${testAmount.toLocaleString()}` },
         ...prev,
       ]);
       setTimeout(() => {
@@ -758,7 +689,7 @@ function InteractivePrototype({ findings, chunks }) {
     setVerifiedList((prev) => {
       const next = !prev[id];
       setAuditLogs((logs) => [
-        { ts: new Date().toISOString().slice(11, 19) + " UTC", event: `${next ? "Verified" : "Unchecked"} rule: ${stmt.slice(0, 45)}...` },
+        { ts: new Date().toISOString().slice(11, 19) + " UTC", event: `${next ? "Marked reviewed" : "Unchecked review"}: ${stmt.slice(0, 45)}...` },
         ...logs,
       ]);
       return { ...prev, [id]: next };
@@ -768,7 +699,7 @@ function InteractivePrototype({ findings, chunks }) {
   function handleDispatchAction() {
     setActionDispatched(true);
     setAuditLogs((prev) => [
-      { ts: new Date().toISOString().slice(11, 19) + " UTC", event: "Proposal dispatch simulated to verified stakeholder" },
+        { ts: new Date().toISOString().slice(11, 19) + " UTC", event: "Proposal dispatch simulation recorded" },
       ...prev,
     ]);
   }
@@ -777,31 +708,31 @@ function InteractivePrototype({ findings, chunks }) {
     <div className="prototype-container">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <div>
-          <h3 style={{ margin: "0 0 2px", color: "#38bdf8" }}>⚡ Interactive Requirements Simulator</h3>
+          <h3 style={{ margin: "0 0 2px", color: "var(--accent-text)" }}>Interactive Requirements Simulator</h3>
           <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
-            Live interactive prototype generated strictly from your uploaded source findings.
+            Local prototype simulation based on extracted findings. Actions here do not process transactions, authenticate users, or send deliverables.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {stakeholders.map((s, idx) => (
-            <span key={idx} className="chip" style={{ background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8", fontSize: "0.75rem" }}>
-              👤 {s.statement}
+            <span key={idx} className="chip" style={{ background: "color-mix(in srgb, var(--accent) 10%, var(--elev))", color: "var(--accent-text)", fontSize: "0.75rem" }}>
+              {s.statement}
             </span>
           ))}
         </div>
       </div>
 
-      <div className="prototype-screen" style={{ gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr)", gap: 20 }}>
+      <div className="prototype-screen">
         {/* Left Column: Interactive Rule Testing */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0, width: "100%" }}>
           {/* Threshold / 2FA Simulator */}
-          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, minWidth: 0 }}>
+          <div style={{ background: "var(--elev-2)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, minWidth: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
               <strong style={{ fontSize: "0.92rem", display: "flex", alignItems: "center", gap: 6 }}>
-                <span>🔐</span> Security & Threshold Evaluation
+                Security & threshold evaluation
               </strong>
-              <span className="chip" style={{ fontSize: "0.72rem", background: requires2FA ? "rgba(244, 63, 94, 0.2)" : "rgba(16, 185, 129, 0.2)", color: requires2FA ? "#f43f5e" : "#34d399", border: `1px solid ${requires2FA ? "#f43f5e" : "#10b981"}` }}>
-                {requires2FA ? "2FA Triggered" : "Standard Flow"}
+              <span className="chip" style={{ fontSize: "0.72rem", background: requires2FA ? "color-mix(in srgb, var(--danger) 12%, var(--elev))" : "color-mix(in srgb, var(--good) 12%, var(--elev))", color: requires2FA ? "var(--danger)" : "var(--good)", border: `1px solid ${requires2FA ? "var(--danger)" : "var(--good)"}` }}>
+                {requires2FA ? "Would require 2FA" : "Standard flow"}
               </span>
             </div>
             <p className="muted" style={{ fontSize: "0.8rem", margin: "0 0 14px", lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere" }}>
@@ -816,7 +747,7 @@ function InteractivePrototype({ findings, chunks }) {
                   type="number"
                   value={testAmount}
                   onChange={(e) => setTestAmount(parseFloat(e.target.value) || 0)}
-                  style={{ width: 140, padding: "7px 10px 7px 22px", fontSize: "0.95rem", fontWeight: 700, borderRadius: 8, border: "1px solid var(--line)", background: "rgba(0,0,0,0.2)" }}
+                  style={{ width: 140, padding: "7px 10px 7px 22px", fontSize: "0.95rem", fontWeight: 700, borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg)" }}
                 />
               </div>
               <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>Threshold: <strong>${thresholdAmount.toLocaleString()}</strong></span>
@@ -827,7 +758,7 @@ function InteractivePrototype({ findings, chunks }) {
               <button
                 type="button"
                 className="chip"
-                style={{ cursor: "pointer", fontSize: "0.72rem", background: testAmount === thresholdAmount - 100 ? "rgba(56, 189, 248, 0.2)" : "rgba(255,255,255,0.03)" }}
+                style={{ cursor: "pointer", fontSize: "0.72rem", background: testAmount === thresholdAmount - 100 ? "color-mix(in srgb, var(--accent) 12%, var(--elev))" : "var(--elev)" }}
                 onClick={() => setTestAmount(Math.max(0, thresholdAmount - 100))}
               >
                 ${Math.max(0, thresholdAmount - 100).toLocaleString()} (Below)
@@ -835,7 +766,7 @@ function InteractivePrototype({ findings, chunks }) {
               <button
                 type="button"
                 className="chip"
-                style={{ cursor: "pointer", fontSize: "0.72rem", background: testAmount === thresholdAmount ? "rgba(56, 189, 248, 0.2)" : "rgba(255,255,255,0.03)" }}
+                style={{ cursor: "pointer", fontSize: "0.72rem", background: testAmount === thresholdAmount ? "color-mix(in srgb, var(--accent) 12%, var(--elev))" : "var(--elev)" }}
                 onClick={() => setTestAmount(thresholdAmount)}
               >
                 ${thresholdAmount.toLocaleString()} (Limit)
@@ -843,7 +774,7 @@ function InteractivePrototype({ findings, chunks }) {
               <button
                 type="button"
                 className="chip"
-                style={{ cursor: "pointer", fontSize: "0.72rem", background: testAmount === thresholdAmount + 250 ? "rgba(56, 189, 248, 0.2)" : "rgba(255,255,255,0.03)" }}
+                style={{ cursor: "pointer", fontSize: "0.72rem", background: testAmount === thresholdAmount + 250 ? "color-mix(in srgb, var(--accent) 12%, var(--elev))" : "var(--elev)" }}
                 onClick={() => setTestAmount(thresholdAmount + 250)}
               >
                 ${(thresholdAmount + 250).toLocaleString()} (Elevated)
@@ -851,9 +782,9 @@ function InteractivePrototype({ findings, chunks }) {
             </div>
 
             {requires2FA ? (
-              <div style={{ background: "rgba(244, 63, 94, 0.12)", border: "1px solid #f43f5e", borderRadius: 10, padding: 12 }}>
-                <p style={{ margin: "0 0 8px", fontSize: "0.82rem", color: "#fda4af", lineHeight: 1.4, wordBreak: "break-word" }}>
-                  ⚠️ Amount (${testAmount.toLocaleString()}) exceeds the ${thresholdAmount.toLocaleString()} ceiling — mandatory 2FA required.
+              <div style={{ background: "color-mix(in srgb, var(--danger) 10%, var(--elev))", border: "1px solid var(--danger)", borderRadius: 10, padding: 12 }}>
+                <p style={{ margin: "0 0 8px", fontSize: "0.82rem", color: "var(--ink)", lineHeight: 1.4, wordBreak: "break-word" }}>
+                  Simulated amount (${testAmount.toLocaleString()}) exceeds the ${thresholdAmount.toLocaleString()} ceiling; this rule would require 2FA.
                 </p>
                 <button
                   type="button"
@@ -861,13 +792,13 @@ function InteractivePrototype({ findings, chunks }) {
                   style={{ fontSize: "0.82rem", padding: "6px 14px", cursor: "pointer" }}
                   onClick={() => setOverrideModal(true)}
                 >
-                  🔒 Complete 2FA Verification
+                  Simulate 2FA step
                 </button>
               </div>
             ) : (
-              <div style={{ background: "rgba(16, 185, 129, 0.12)", border: "1px solid #10b981", borderRadius: 10, padding: 12 }}>
-                <p style={{ margin: 0, fontSize: "0.82rem", color: "#6ee7b7", lineHeight: 1.4, wordBreak: "break-word" }}>
-                  ✓ Value (${testAmount.toLocaleString()}) is at or below threshold. Processed without elevated 2FA.
+              <div style={{ background: "color-mix(in srgb, var(--good) 10%, var(--elev))", border: "1px solid var(--good)", borderRadius: 10, padding: 12 }}>
+                <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--good)", lineHeight: 1.4, wordBreak: "break-word" }}>
+                  Simulation: value (${testAmount.toLocaleString()}) is at or below the threshold.
                 </p>
               </div>
             )}
@@ -875,12 +806,12 @@ function InteractivePrototype({ findings, chunks }) {
 
           {/* Budget Guardrail Simulator */}
           {budgetCap && (
-            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, minWidth: 0 }}>
+            <div style={{ background: "var(--elev-2)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, minWidth: 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
                 <strong style={{ fontSize: "0.92rem", display: "flex", alignItems: "center", gap: 6 }}>
-                  <span>💰</span> Budget Guardrail Tracker
+                  Budget guardrail tracker
                 </strong>
-                <span className="chip" style={{ fontSize: "0.72rem", background: exceedsBudget ? "rgba(244, 63, 94, 0.2)" : "rgba(251, 191, 36, 0.2)", color: exceedsBudget ? "#f43f5e" : "#fbbf24", border: `1px solid ${exceedsBudget ? "#f43f5e" : "#fbbf24"}` }}>
+                <span className="chip" style={{ fontSize: "0.72rem", background: exceedsBudget ? "color-mix(in srgb, var(--danger) 12%, var(--elev))" : "color-mix(in srgb, var(--warn) 12%, var(--elev))", color: exceedsBudget ? "var(--danger)" : "var(--warn)", border: `1px solid ${exceedsBudget ? "var(--danger)" : "var(--warn)"}` }}>
                   Limit: ${budgetCap.toLocaleString()}
                 </span>
               </div>
@@ -889,7 +820,7 @@ function InteractivePrototype({ findings, chunks }) {
               </p>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
                 <span>Simulated Spend: <strong>${testSpend.toLocaleString()}</strong> ({Math.round((testSpend / budgetCap) * 100)}%)</span>
-                <span style={{ color: exceedsBudget ? "#f43f5e" : "#34d399", fontWeight: 600 }}>
+                <span style={{ color: exceedsBudget ? "var(--danger)" : "var(--good)", fontWeight: 600 }}>
                   {exceedsBudget ? `Over by $${(testSpend - budgetCap).toLocaleString()}` : `Remaining: $${(budgetCap - testSpend).toLocaleString()}`}
                 </span>
               </div>
@@ -900,15 +831,15 @@ function InteractivePrototype({ findings, chunks }) {
                 step={Math.max(1000, Math.round(budgetCap * 0.05))}
                 value={testSpend}
                 onChange={(e) => setTestSpend(parseFloat(e.target.value))}
-                style={{ width: "100%", accentColor: exceedsBudget ? "#f43f5e" : "#38bdf8", cursor: "pointer" }}
+                style={{ width: "100%", accentColor: exceedsBudget ? "var(--danger)" : "var(--accent)", cursor: "pointer" }}
               />
             </div>
           )}
 
           {/* Action Item / Proposal Dispatch Simulator */}
-          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, minWidth: 0 }}>
+          <div style={{ background: "var(--elev-2)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, minWidth: 0 }}>
             <strong style={{ fontSize: "0.92rem", display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-              <span>📤</span> Stakeholder Deliverable Dispatch
+              Stakeholder deliverable dispatch
             </strong>
             <p className="muted" style={{ fontSize: "0.78rem", margin: "0 0 14px", lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere" }}>
               Simulate dispatching technical architecture deliverables to the recipient requested in the source document.
@@ -920,7 +851,7 @@ function InteractivePrototype({ findings, chunks }) {
               onClick={handleDispatchAction}
               style={{ fontSize: "0.82rem", padding: "8px 16px", cursor: actionDispatched ? "default" : "pointer" }}
             >
-              {actionDispatched ? "✓ Deliverable Dispatched & Logged" : "📨 Dispatch Updated Architecture Proposal"}
+              {actionDispatched ? "Dispatch simulation logged" : "Simulate proposal dispatch"}
             </button>
           </div>
         </div>
@@ -928,32 +859,32 @@ function InteractivePrototype({ findings, chunks }) {
         {/* Right Column: Live Requirement Verification & Audit Log */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0, width: "100%" }}>
           {/* Requirement Verification Checklist */}
-          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <div style={{ background: "var(--elev-2)", border: "1px solid var(--line)", borderRadius: 14, padding: 18, flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
               <div>
-                <strong style={{ fontSize: "0.95rem", display: "block" }}>📋 Requirements Compliance Matrix</strong>
+                <strong style={{ fontSize: "0.95rem", display: "block" }}>Requirements review checklist</strong>
                 <span className="muted" style={{ fontSize: "0.76rem" }}>
-                  {Object.values(verifiedList).filter(Boolean).length} of {reqItems.length} Verified ({reqItems.length ? Math.round((Object.values(verifiedList).filter(Boolean).length / reqItems.length) * 100) : 0}%)
+                  {Object.values(verifiedList).filter(Boolean).length} of {reqItems.length} marked reviewed ({reqItems.length ? Math.round((Object.values(verifiedList).filter(Boolean).length / reqItems.length) * 100) : 0}%)
                 </span>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   type="button"
                   className="chip"
-                  style={{ cursor: "pointer", background: "rgba(56, 189, 248, 0.12)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)", fontSize: "0.72rem" }}
+                  style={{ cursor: "pointer", background: "color-mix(in srgb, var(--accent) 10%, var(--elev))", color: "var(--accent-text)", border: "1px solid color-mix(in srgb, var(--accent) 30%, var(--line))", fontSize: "0.72rem" }}
                   onClick={() => {
                     const all = {};
                     reqItems.forEach((r) => { all[r.id] = true; });
                     setVerifiedList(all);
-                    setAuditLogs((l) => [{ ts: new Date().toISOString().slice(11, 19) + " UTC", event: `Verified all ${reqItems.length} requirements` }, ...l]);
+                    setAuditLogs((l) => [{ ts: new Date().toISOString().slice(11, 19) + " UTC", event: `Marked all ${reqItems.length} items reviewed locally` }, ...l]);
                   }}
                 >
-                  ✓ Verify All
+                  Mark all reviewed
                 </button>
                 <button
                   type="button"
                   className="chip"
-                  style={{ cursor: "pointer", background: "rgba(255, 255, 255, 0.05)", border: "1px solid var(--line)", fontSize: "0.72rem" }}
+                  style={{ cursor: "pointer", background: "var(--elev)", border: "1px solid var(--line)", fontSize: "0.72rem" }}
                   onClick={() => {
                     setVerifiedList({});
                     setAuditLogs((l) => [{ ts: new Date().toISOString().slice(11, 19) + " UTC", event: "Reset all requirement checks" }, ...l]);
@@ -965,12 +896,12 @@ function InteractivePrototype({ findings, chunks }) {
             </div>
 
             {/* Verification Progress Bar */}
-            <div style={{ width: "100%", height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 999, overflow: "hidden", marginBottom: 14 }}>
+            <div style={{ width: "100%", height: 6, background: "var(--bg)", borderRadius: 999, overflow: "hidden", marginBottom: 14 }}>
               <div
                 style={{
                   width: `${reqItems.length ? (Object.values(verifiedList).filter(Boolean).length / reqItems.length) * 100 : 0}%`,
                   height: "100%",
-                  background: "linear-gradient(90deg, #10b981, #38bdf8)",
+                  background: "var(--accent)",
                   transition: "width 0.3s ease",
                 }}
               />
@@ -990,8 +921,8 @@ function InteractivePrototype({ findings, chunks }) {
                       gap: 12,
                       padding: "12px 14px",
                       borderRadius: 10,
-                      background: isChecked ? "rgba(16, 185, 129, 0.08)" : "rgba(255,255,255,0.02)",
-                      border: `1px solid ${isChecked ? "#10b981" : "rgba(255,255,255,0.07)"}`,
+                      background: isChecked ? "color-mix(in srgb, var(--good) 8%, var(--elev))" : "var(--elev)",
+                      border: `1px solid ${isChecked ? "color-mix(in srgb, var(--good) 40%, var(--line))" : "var(--line)"}`,
                       cursor: "pointer",
                       transition: "all 0.15s ease",
                       minWidth: 0,
@@ -1001,26 +932,28 @@ function InteractivePrototype({ findings, chunks }) {
                       type="checkbox"
                       checked={isChecked}
                       onChange={() => {}}
-                      style={{ marginTop: 2, cursor: "pointer", accentColor: "#10b981", transform: "scale(1.15)" }}
+                      style={{ marginTop: 2, cursor: "pointer", accentColor: "var(--good)", transform: "scale(1.15)" }}
                     />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{
                         margin: "0 0 6px",
                         fontSize: "0.84rem",
                         lineHeight: 1.45,
-                        color: isChecked ? "#6ee7b7" : "inherit",
+                        color: isChecked ? "var(--good)" : "var(--ink)",
                         wordBreak: "break-word",
                         overflowWrap: "anywhere",
                       }}>
                         {f.statement}
                       </p>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <span className="chip" style={{ fontSize: "0.68rem", padding: "2px 8px", background: "rgba(255,255,255,0.04)" }}>
+                        <span className="chip" style={{ fontSize: "0.68rem", padding: "2px 8px", background: "var(--bg-2)" }}>
                           {f.section.replace(/_/g, " ")}
                         </span>
-                        <span className="muted" style={{ fontSize: "0.7rem" }}>
-                          {Math.round(f.confidence * 100)}% confidence
-                        </span>
+                        {typeof f.confidence === "number" && Number.isFinite(f.confidence) && (
+                          <span className="muted" style={{ fontSize: "0.7rem" }}>
+                            Confidence · {Math.round(f.confidence * 100)}%
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1030,18 +963,18 @@ function InteractivePrototype({ findings, chunks }) {
           </div>
 
           {/* Live Session Audit Stream */}
-          <div style={{ background: "#090d16", border: "1px solid #1e293b", borderRadius: 12, padding: 14, minWidth: 0 }}>
+          <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, minWidth: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <strong style={{ fontSize: "0.78rem", color: "#94a3b8", display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
-                Real-Time Audit Stream
+              <strong style={{ fontSize: "0.78rem", color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--good)", display: "inline-block" }} />
+                Local review log
               </strong>
               <span className="muted" style={{ fontSize: "0.7rem" }}>{auditLogs.length} events logged</span>
             </div>
             <div style={{ maxHeight: 110, overflowY: "auto", fontSize: "0.75rem", display: "flex", flexDirection: "column", gap: 5 }}>
               {auditLogs.map((log, i) => (
-                <div key={i} style={{ color: "#38bdf8", wordBreak: "break-word", overflowWrap: "anywhere" }}>
-                  <span style={{ color: "#64748b" }}>[{log.ts}]</span> {log.event}
+                <div key={i} style={{ color: "var(--accent-text)", wordBreak: "break-word", overflowWrap: "anywhere" }}>
+                  <span style={{ color: "var(--muted)" }}>[{log.ts}]</span> {log.event}
                 </div>
               ))}
             </div>
@@ -1052,9 +985,9 @@ function InteractivePrototype({ findings, chunks }) {
       {overrideModal && (
         <div className="auth-overlay">
           <div className="auth-card" style={{ maxWidth: 380 }}>
-            <h4 style={{ margin: "0 0 6px" }}>🔒 Security Verification Challenge</h4>
+            <h4 style={{ margin: "0 0 6px" }}>Simulated security check</h4>
             <p className="muted" style={{ fontSize: "0.8rem", margin: "0 0 12px" }}>
-              {thresholdRule ? thresholdRule.statement : "Mandatory verification required for elevated transaction."}
+              {thresholdRule ? thresholdRule.statement : "A local rule simulation for elevated transactions."}
             </p>
             <input
               type="password"
@@ -1070,7 +1003,7 @@ function InteractivePrototype({ findings, chunks }) {
             )}
             <div style={{ display: "flex", gap: 8 }}>
               <button type="button" className="btn primary" style={{ flex: 1 }} onClick={handleVerifyOverride}>
-                Verify 2FA
+                Simulate 2FA
               </button>
               <button type="button" className="btn ghost" onClick={() => setOverrideModal(false)}>
                 Cancel
@@ -1124,7 +1057,7 @@ function GherkinTestCases({ sessionId }) {
     <div className="gherkin-container">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
         <div>
-          <h3 style={{ margin: "0 0 2px" }}>🧪 Acceptance Tests (Gherkin)</h3>
+          <h3 style={{ margin: "0 0 2px" }}>Acceptance tests (Gherkin)</h3>
           <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
             Plain-English Given / When / Then checks, one for each requirement found in your files.
           </p>
@@ -1136,7 +1069,7 @@ function GherkinTestCases({ sessionId }) {
             disabled={testCases.length === 0}
             onClick={downloadFeatureFile}
           >
-            ⬇️ Download .feature file
+            Download .feature file
           </button>
         </div>
       </div>
@@ -1174,7 +1107,7 @@ function GherkinTestCases({ sessionId }) {
                     {testCases[activeTab].name}
                   </p>
                 </div>
-                <span className="chip" style={{ background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8" }}>
+                <span className="chip" style={{ background: "color-mix(in srgb, var(--accent) 10%, var(--elev))", color: "var(--accent-text)" }}>
                   Ready to run · {testCases[activeTab].coverage}
                 </span>
               </div>
@@ -1219,7 +1152,7 @@ function ImpactRippleGraph({ sessionId }) {
     <div className="ripple-graph-panel">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
-          <h3 style={{ margin: "0 0 2px", color: "#818cf8" }}>🕸️ Interactive Impact Ripple Graph</h3>
+          <h3 style={{ margin: "0 0 2px", color: "var(--accent-text)" }}>Interactive Impact Ripple Graph</h3>
           <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
             Visualizes cross-cutting dependencies between Requirements, Stakeholders, Budgets, and Deadlines.
           </p>
@@ -1235,15 +1168,15 @@ function ImpactRippleGraph({ sessionId }) {
             style={{ padding: "8px 14px", flex: 1, minWidth: 200 }}
             onClick={() => triggerSimulation(sim)}
           >
-            <strong>⚡ {sim.title}</strong>
+            <strong>{sim.title}</strong>
           </button>
         ))}
       </div>
 
       {currentSim && (
-        <div style={{ background: "rgba(244, 63, 94, 0.12)", border: "1px solid #f43f5e", borderRadius: 12, padding: 14, marginBottom: 18 }}>
-          <strong style={{ color: "#fb7185", fontSize: "0.88rem" }}>Cascading Ripple Impact:</strong>
-          <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "#fecdd3" }}>{currentSim.impact_summary}</p>
+        <div style={{ background: "color-mix(in srgb, var(--accent) 8%, var(--elev))", border: "1px solid color-mix(in srgb, var(--accent) 35%, var(--line))", borderRadius: 12, padding: 14, marginBottom: 18 }}>
+          <strong style={{ color: "var(--accent-text)", fontSize: "0.88rem" }}>Cascading ripple impact:</strong>
+          <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "var(--ink)" }}>{currentSim.impact_summary}</p>
         </div>
       )}
 
@@ -1253,20 +1186,28 @@ function ImpactRippleGraph({ sessionId }) {
         </div>
       )}
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 18, background: "#060913", borderRadius: 14, border: "1px solid #1e293b" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 18, background: "var(--bg-2)", borderRadius: 14, border: "1px solid var(--line)" }}>
         {graphData?.nodes?.map((node) => {
           const isPulsing = pulsingNodes.includes(node.id);
+          const nodeColor = {
+            project: "var(--accent-2)",
+            stakeholder: "var(--accent-2)",
+            budget: "var(--warn)",
+            deadline: "var(--danger)",
+            requirement: "var(--good)",
+            task: "var(--muted)",
+          }[node.type] || "var(--muted)";
           return (
             <div
               key={node.id}
               className={`ripple-node-badge ${isPulsing ? "pulsing" : ""}`}
               style={{
-                background: isPulsing ? "rgba(244, 63, 94, 0.3)" : "#1e293b",
-                color: isPulsing ? "#fda4af" : node.color,
-                borderColor: isPulsing ? "#f43f5e" : "rgba(255,255,255,0.1)",
+                background: isPulsing ? "color-mix(in srgb, var(--accent) 12%, var(--elev-2))" : "var(--elev-2)",
+                color: isPulsing ? "var(--accent)" : node.color,
+                borderColor: isPulsing ? "var(--accent)" : "var(--line)",
               }}
             >
-              <span>{isPulsing ? "⚠️" : "●"}</span>
+              <span>{isPulsing ? "!" : "●"}</span>
               <span>{node.label}</span>
             </div>
           );
@@ -1281,56 +1222,69 @@ function ImpactRippleGraph({ sessionId }) {
 // ==========================================
 function DecisionTraceTimeline({ events, router, state }) {
   const [activeStep, setActiveStep] = useState(0);
-
-  // Every detail below is computed from the current session (no demo text)
   const findings = state?.findings || [];
-  const chunks = state?.chunks || [];
-  const files = [...new Set(chunks.map((c) => c.file_name))];
-  const count = (pred) => findings.filter(pred).length;
-  const conflicts = state?.conflicts || [];
-  const steps = [
-    { name: "1. File Ingestion", model: "Local IO", status: "Completed", detail: files.length ? `Read ${files.length} file(s): ${files.join(", ")} (${chunks.length} text blocks).` : "No files uploaded yet." },
-    { name: "2. Model Router", model: router?.active_model || "—", status: "Active", detail: "Selected the AI model used for extraction." },
-    { name: "3. Requirements Extraction", model: "Specialist L1", status: "Extracted", detail: `${count((f) => ["functional_requirements", "non_functional_requirements", "objectives", "scope"].includes(f.section))} requirement(s) found.` },
-    { name: "4. Stakeholder Detection", model: "Specialist L1", status: "Extracted", detail: `${count((f) => f.section === "stakeholders")} stakeholder(s) found.` },
-    { name: "5. Budget Extraction", model: "Finance Specialist", status: "Extracted", detail: `${count((f) => f.section === "budget")} budget item(s) found.` },
-    { name: "6. Validator & Noise Filter", model: "Validator L2", status: "Verified", detail: `${findings.length} finding(s) kept after grounding checks; ${(state?.gaps || []).length} flagged as gaps.` },
-    { name: "7. Conflict Check", model: "Conflict Engine", status: conflicts.length ? "Flagged" : "Clear", detail: conflicts.length ? conflicts.map((c) => c.topic).join(", ") : "No conflicting statements between your sources." },
-    { name: "8. BRD & Exports", model: "Orchestrator", status: "Delivered", detail: "Built the BRD, diagrams, test suite and export files from the findings above." },
-  ];
+  const steps = (events || []).map((event, index) => ({
+    name: `L${event.level} · ${formatAgentName(event.agent)}`,
+    model: router?.active_model || "Route not reported",
+    status: event.status === "running" ? "Recorded as running" : event.status || "Status not reported",
+    detail: event.detail || event.task || "No event detail was returned.",
+    id: `${event.agent}-${event.task}-${index}`,
+  }));
+  if (state) {
+    steps.push({
+      name: "Session snapshot",
+      model: router?.active_model || "Route not reported",
+      status: "Recorded",
+      detail: `${findings.length} findings and ${(state.conflicts || []).length} conflicts are present in the saved session.`,
+      id: "session-snapshot",
+    });
+  }
+  const selectedStep = steps[Math.min(activeStep, Math.max(steps.length - 1, 0))];
 
   return (
     <div className="trace-timeline-container">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
-          <h3 style={{ margin: "0 0 2px" }}>⏳ Replayable Decision Trace</h3>
+          <h3 style={{ margin: "0 0 2px" }}>Recorded activity trace</h3>
           <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
-            Scrubbable timeline showing every multi-agent decision, model call, and grounding check.
+            Review the delegation events returned by the processing pipeline.
           </p>
         </div>
-        <span className="chip" style={{ background: "var(--accent)", color: "#fff" }}>
-          Step {activeStep + 1} of {steps.length}
-        </span>
-      </div>
-
-      <input
-        type="range"
-        min="0"
-        max={steps.length - 1}
-        value={activeStep}
-        onChange={(e) => setActiveStep(Number(e.target.value))}
-        style={{ width: "100%", margin: "8px 0 16px" }}
-      />
-
-      <div className="trace-step-card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <strong style={{ fontSize: "1rem" }}>{steps[activeStep].name}</strong>
-          <span className="chip" style={{ background: "rgba(14, 165, 233, 0.2)", color: "#38bdf8" }}>
-            {steps[activeStep].model}
+        {steps.length > 0 && (
+          <span className="chip">
+            Event {Math.min(activeStep + 1, steps.length)} of {steps.length}
           </span>
-        </div>
-        <p style={{ margin: "4px 0 0", fontSize: "0.88rem" }}>{steps[activeStep].detail}</p>
+        )}
       </div>
+
+      {router?.active_model && (
+        <p className="muted">{routingStatusLabel(router)} · {router.active_model}</p>
+      )}
+
+      {selectedStep ? (
+        <>
+          {steps.length > 1 && (
+            <input
+              type="range"
+              aria-label="Select recorded activity event"
+              min="0"
+              max={steps.length - 1}
+              value={Math.min(activeStep, steps.length - 1)}
+              onChange={(e) => setActiveStep(Number(e.target.value))}
+              style={{ width: "100%", margin: "8px 0 16px" }}
+            />
+          )}
+          <div className="trace-step-card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <strong style={{ fontSize: "1rem" }}>{selectedStep.name}</strong>
+              <span className="chip">{selectedStep.status}</span>
+            </div>
+            <p style={{ margin: "4px 0 0", fontSize: "0.88rem" }}>{selectedStep.detail}</p>
+          </div>
+        </>
+      ) : (
+        <p className="muted">No delegation events or saved session details have been reported yet.</p>
+      )}
     </div>
   );
 }
@@ -1376,9 +1330,9 @@ function LiveMeetingMode({ sessionId, onNewFinding }) {
     <div className="meeting-panel">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
-          <h3 style={{ margin: "0 0 2px", color: "#f43f5e" }}>🎙️ Live Meeting Mode & Real-Time Interrupter</h3>
+          <h3 style={{ margin: "0 0 2px", color: "var(--accent-text)" }}>Meeting conflict check</h3>
           <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
-            Listens to meetings in real-time and dynamically interrupts when live speech contradicts established requirements.
+            Check typed meeting notes or sample phrases against established requirements, budgets, and deadlines.
           </p>
         </div>
       </div>
@@ -1397,7 +1351,7 @@ function LiveMeetingMode({ sessionId, onNewFinding }) {
             style={{ fontSize: "0.8rem", border: "1px dashed var(--line)" }}
             onClick={() => simulatePhrase(t.phrase)}
           >
-            ⚡ {t.label}
+            {t.label}
           </button>
         ))}
       </div>
@@ -1409,7 +1363,7 @@ function LiveMeetingMode({ sessionId, onNewFinding }) {
           <button
             type="button"
             className="btn ghost"
-            style={{ marginTop: 8, padding: "2px 8px", fontSize: "0.75rem", background: "rgba(255,255,255,0.2)", color: "#fff" }}
+            style={{ marginTop: 8, padding: "2px 8px", fontSize: "0.75rem", background: "var(--elev)", color: "var(--ink)" }}
             onClick={() => setInterruptAlert(null)}
           >
             Acknowledge & Dismiss
@@ -1418,11 +1372,11 @@ function LiveMeetingMode({ sessionId, onNewFinding }) {
       )}
 
       <div style={{ marginTop: 14 }}>
-        <strong style={{ fontSize: "0.85rem" }}>Live Meeting Transcript:</strong>
+        <strong style={{ fontSize: "0.85rem" }}>Meeting Notes & Transcript:</strong>
         <textarea
           rows={5}
           value={meetingTranscript}
-          placeholder="Speak or click a trigger above to test real-time conflict detection..."
+          placeholder="Type a meeting note or click a sample phrase to check for conflicts..."
           onChange={(e) => {
             setMeetingTranscript(e.target.value);
             checkInterruption(e.target.value);
@@ -1453,35 +1407,31 @@ function AccuracyScorecard({ isOpen, onClose }) {
       <div className="auth-card scorecard-modal">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div>
-            <h3 style={{ margin: "0 0 2px" }}>📊 Multi-Agent Accuracy Scorecard</h3>
+            <h3 style={{ margin: "0 0 2px" }}>Multi-Agent Accuracy Scorecard</h3>
             <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
-              Benchmarking precision, recall, and grounding integrity with vs. without Multi-Agent Validation.
+              Reference metrics returned by the backend. These are not measurements of the current session.
             </p>
           </div>
           <button type="button" className="btn ghost" onClick={onClose}>✕</button>
         </div>
 
-        <div style={{ background: "rgba(16, 185, 129, 0.15)", border: "1px solid #10b981", borderRadius: 12, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <strong style={{ fontSize: "1.1rem", color: "#34d399" }}>98.4% Overall Grounding Fidelity</strong>
-            <p className="muted" style={{ margin: "2px 0 0", fontSize: "0.8rem" }}>
-              100% of extracted requirements are verified against source evidence with zero hallucination.
-            </p>
-          </div>
-          <span className="chip" style={{ background: "#10b981", color: "#fff", fontWeight: 700 }}>VERIFIED</span>
-        </div>
+        {scorecard?.metrics?.length > 0 && (
+          <p className="muted" style={{ margin: "0 0 12px", fontSize: "0.8rem" }}>
+            Benchmark metrics returned for this scorecard.
+          </p>
+        )}
 
         <div className="metric-grid">
           {scorecard?.metrics?.map((m, i) => (
             <div key={i} className="metric-card">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <strong style={{ fontSize: "0.85rem" }}>{m.name}</strong>
-                <span style={{ color: "#34d399", fontWeight: 700, fontSize: "0.85rem" }}>{m.improvement}</span>
+                <span style={{ color: "var(--good)", fontWeight: 700, fontSize: "0.85rem" }}>{m.improvement}</span>
               </div>
               <div style={{ display: "flex", gap: 14, margin: "8px 0", fontSize: "0.85rem" }}>
                 <div>
                   <span className="muted" style={{ display: "block", fontSize: "0.72rem" }}>With Validator</span>
-                  <strong style={{ color: "var(--accent)" }}>{m.with_validator}%</strong>
+                  <strong style={{ color: "var(--accent-text)" }}>{m.with_validator}%</strong>
                 </div>
                 <div>
                   <span className="muted" style={{ display: "block", fontSize: "0.72rem" }}>Without Validator</span>
@@ -1492,6 +1442,9 @@ function AccuracyScorecard({ isOpen, onClose }) {
             </div>
           ))}
         </div>
+        {scorecard && !scorecard.metrics?.length && (
+          <p className="muted" style={{ margin: 0 }}>No benchmark metrics were returned.</p>
+        )}
       </div>
     </div>
   );
@@ -1501,7 +1454,6 @@ function AccuracyScorecard({ isOpen, onClose }) {
 // MAIN APPLICATION COMPONENT
 // ==========================================
 export default function App() {
-  const fileInputRef = useRef(null);
   const [theme, setTheme] = useTheme();
   const [user, setUser] = useState(() => {
     try {
@@ -1532,7 +1484,7 @@ export default function App() {
   const [sections, setSections] = useState([]);
   const [state, setState] = useState(null);
   const [events, setEvents] = useState([]);
-  const [router, setRouter] = useState({ active_model: "gemini-3.8-flash", fallback: false });
+  const [router, setRouter] = useState(null);
   const [tab, setTab] = useState("inbox"); // "inbox" | "timeline" | "calendar"
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -1543,7 +1495,41 @@ export default function App() {
   const [simulate, setSimulate] = useState(false);
   const [toast, setToast] = useState(null);
   const [emailDispatchModal, setEmailDispatchModal] = useState(null);
-  const [filePreviewModal, setFilePreviewModal] = useState(null);
+  const emailDispatchOpen = Boolean(emailDispatchModal);
+
+  useEffect(() => {
+    if (!showAuthModal && !showScenarioModal && !emailDispatchOpen) return undefined;
+    const previouslyFocused = document.activeElement;
+    document.querySelector(".auth-overlay [data-modal-initial-focus]")?.focus({ preventScroll: true });
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        if (emailDispatchOpen) setEmailDispatchModal(null);
+        else if (showAuthModal) setShowAuthModal(false);
+        else if (showScenarioModal) setShowScenarioModal(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = document.querySelector(".auth-overlay [role='dialog']");
+      const focusable = dialog && [...dialog.querySelectorAll(
+        "button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])",
+      )].filter((element) => element.getClientRects().length > 0);
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, [showAuthModal, showScenarioModal, emailDispatchOpen]);
 
   const drafts = useMemo(
     () => (state?.tasks || []).filter((t) => t.type === "draft_email"),
@@ -1691,9 +1677,11 @@ export default function App() {
     try {
       const data = await jsonFetch(`/api/upload/${SESSION}/${encodeURIComponent(fileName)}`, { method: "DELETE" });
       setFiles(data.files || []);
-      showToast(`Removed "${fileName}"`);
+      showToast(`Removed "${fileName}" from the active source list. Server-side cleanup is not confirmed.`);
+      return true;
     } catch (err) {
-      setFiles((prev) => prev.filter((f) => f.name !== fileName));
+      showToast(`Unable to remove "${fileName}": ${err.message}`);
+      return false;
     }
   }
 
@@ -1701,18 +1689,18 @@ export default function App() {
     try {
       await jsonFetch(`/api/upload/${SESSION}`, { method: "DELETE" });
       setFiles([]);
-      showToast("Cleared all uploaded files.");
+      showToast("Cleared the active source list. Server-side cleanup is not confirmed.");
     } catch (err) {
-      setFiles([]);
+      showToast(`Unable to clear the source list: ${err.message}`);
     }
   }
 
   async function openFilePreview(fileName) {
     try {
-      const data = await jsonFetch(`/api/upload/${SESSION}/preview/${encodeURIComponent(fileName)}`);
-      setFilePreviewModal(data);
+      return await jsonFetch(`/api/upload/${SESSION}/preview/${encodeURIComponent(fileName)}`);
     } catch (err) {
       showToast(`Preview: ${err.message || "File preview unavailable"}`);
+      return null;
     }
   }
 
@@ -1758,17 +1746,26 @@ export default function App() {
     };
   }
 
-  function openEvidence(findingIdOrObj) {
-    if (typeof findingIdOrObj === "object") {
+  function openEvidence(findingIdOrObj, sourceChunk) {
+    if (findingIdOrObj && typeof findingIdOrObj === "object") {
+      if (!sourceChunk) return;
       setEvidence({
-        finding: { statement: findingIdOrObj.snippet, confidence: findingIdOrObj.confidence, agent: "Grounded Citation" },
-        chunk: { file_name: findingIdOrObj.file_name, source_id: findingIdOrObj.source_id, text: findingIdOrObj.snippet },
+        citation: true,
+        citationUnverified: true,
+        confidence: findingIdOrObj.confidence,
+        chunk: sourceChunk,
       });
       return;
     }
     const finding = (state?.findings || []).find((f) => f.id === findingIdOrObj);
+    if (!finding) return;
     const chunk = (state?.chunks || []).find((c) => c.source_id === finding?.source_id);
-    setEvidence({ finding, chunk });
+    setEvidence({ finding, chunk, findingId: finding.id });
+  }
+
+  function openCopilotEvidence(citation, sourceChunk) {
+    setShowCopilot(false);
+    openEvidence(citation, sourceChunk);
   }
 
   async function resolveConflict(id, keep) {
@@ -1783,24 +1780,46 @@ export default function App() {
 
   async function act(taskObj, action) {
     const taskId = typeof taskObj === "object" ? taskObj.id : taskObj;
+    let actionResponse;
     try {
-      await jsonFetch(`/api/tasks/${taskId}/${action}`, { method: "POST" });
+      actionResponse = await jsonFetch(`/api/tasks/${taskId}/${action}`, { method: "POST" });
+      if (action === "approved") {
+        const recipient = (typeof taskObj === "object" && taskObj.payload?.recipient) || "Client / Team Lead";
+        const subject = (typeof taskObj === "object" && taskObj.payload?.subject) || "Requirement Action Item Update";
+        const body = (typeof taskObj === "object" && taskObj.payload?.body) || "Action item approved and recorded.";
+        const dispatch = actionResponse?.dispatch;
+        const sent = dispatch?.sent === true;
+        setEmailDispatchModal({
+          recipient: dispatch?.target || recipient,
+          subject,
+          body,
+          sent,
+          method: dispatch?.method || "unconfirmed",
+          actionConfirmed: Boolean(actionResponse) &&
+            actionResponse.success !== false &&
+            actionResponse.ok !== false &&
+            !actionResponse.error,
+        });
+        showToast(sent
+          ? "Task approved and email delivery confirmed."
+          : dispatch?.sent === false
+            ? "Task approved; email was not sent."
+            : "Task approved; email delivery is unconfirmed.");
+      }
     } catch (err) {
-      console.log("Task endpoint note:", err);
+      showToast(`Could not update task: ${err.message}`);
+      return;
     }
-    const next = await jsonFetch(`/api/session/${SESSION}`);
-    setState(next);
-    fetchCalendar();
 
-    if (action === "approved") {
-      const recipient = (typeof taskObj === "object" && taskObj.payload?.recipient) || "Client / Team Lead";
-      const subject = (typeof taskObj === "object" && taskObj.payload?.subject) || "Requirement Action Item Update";
-      const body = (typeof taskObj === "object" && taskObj.payload?.body) || "Action item approved and recorded.";
-      setEmailDispatchModal({ recipient, subject, body, time: new Date().toLocaleTimeString() });
-      showToast("Approved & Sent! Email dispatched.");
-    } else {
-      showToast("Task dismissed.");
+    try {
+      const next = await jsonFetch(`/api/session/${SESSION}`);
+      setState(next);
+      fetchCalendar();
+    } catch (err) {
+      showToast(`Task action completed, but the workspace refresh failed: ${err.message}`);
+      return;
     }
+    if (action !== "approved") showToast("Task dismissed.");
   }
 
   async function ff() {
@@ -1851,31 +1870,38 @@ export default function App() {
           <img src="/orbius-logo.png" alt="Orbius" className="brand-logo-img" />
           <div>
             <b>Orbius</b>
-            <span>Multi-agent BRD studio</span>
+            <span>Evidence-first requirements workspace</span>
           </div>
         </div>
         <div className="top-actions">
           <span className="model-pill">
-            <span className={`dot ${router.fallback ? "warn" : ""}`} />
-            {router.fallback ? "Fallback (quota hit)" : "Primary"} · {router.active_model}
+            <span className={`dot ${router?.fallback ? "warn" : ""}`} />
+            {router?.active_model
+              ? `${routingStatusLabel(router)} · ${router.active_model}`
+              : routingStatusLabel(router)}
           </span>
-          <button className="icon-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+          <button
+            className="icon-btn theme-toggle"
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            <Icon name={theme === "dark" ? "sun" : "moon"} size={16} />
             {theme === "dark" ? "Light" : "Dark"}
           </button>
 
           <button
             type="button"
             className="btn ghost"
-            style={{ fontSize: "0.8rem", color: "#34d399" }}
+            style={{ fontSize: "0.8rem" }}
             onClick={() => setShowScorecard(true)}
-            title="View Multi-Agent Accuracy & Grounding Scorecard"
+            title="View static validation benchmarks"
           >
-            📊 Scorecard
+            Scorecard
           </button>
 
           {user ? (
             <div className="user-badge">
-              <span>👤 {user.name}</span>
+              <span>{user.name}</span>
               <button className="btn ghost" style={{ padding: "2px 6px", fontSize: "0.75rem" }} onClick={handleLogout}>
                 Sign Out
               </button>
@@ -1894,11 +1920,11 @@ export default function App() {
               <button
                 type="button"
                 className="btn ghost"
-                style={{ color: "var(--accent)" }}
+                style={{ color: "var(--accent-text)" }}
                 onClick={() => setShowScenarioModal(true)}
                 title="Simulate budget cuts, compressed timelines, or scope trade-offs"
               >
-                ⚡ What-If
+                What-if
               </button>
               <button
                 type="button"
@@ -1906,7 +1932,7 @@ export default function App() {
                 onClick={resetWorkspace}
                 title="Clear current session and start a new project"
               >
-                ✨ New Run
+                New run
               </button>
               <button type="button" className="btn ghost" onClick={goToHome}>
                 Home
@@ -1926,39 +1952,142 @@ export default function App() {
 
       {view === "landing" ? (
         <main className={`landing ${isTransitioning ? "transition-exit" : "transition-enter"}`}>
-          <div className="hero">
-            <div>
-              <p className="muted">Hackathon track · Business Requirements Documents</p>
-              <h1>Scattered inputs. A living BRD. Follow-ups that do not vanish.</h1>
-              <p className="lede">
-                Orbius reads emails, transcripts, PDFs, sheets, wireframes, and audio briefs in parallel. A validator
-                catches contradictions. An Ops Agent drafts follow-ups and synchronizes deadlines.
+          <section className="landing-hero" aria-labelledby="landing-title">
+            <div className="landing-hero__copy">
+              <p className="landing-kicker"><span /> OBSERVATORY / INTELLIGENCE IN MOTION</p>
+              <h1 id="landing-title" className="landing-title">
+                <span className="landing-title__line">Fragmented</span>
+                <span className="landing-title__line landing-title__line--accent">information.</span>
+                <span className="landing-title__line">Decisions you</span>
+                <span className="landing-title__line">can <em>trace.</em></span>
+              </h1>
+              <p className="landing-hero__lede">
+                Orbius turns project signals scattered across documents, conversations, images, and spreadsheets into requirements your team can inspect, challenge, and act on.
               </p>
-              <div className="chip-row">
-                <span className="chip">Architecture & Sequence Diagrams</span>
-                <span className="chip">Clickable HTML Prototype</span>
-                <span className="chip">Gherkin Test Suite</span>
-                <span className="chip">Impact Ripple Graph</span>
-                <span className="chip">Live Meeting Interrupter</span>
-                <span className="chip">What-If Simulator</span>
-              </div>
-              <div className="row" style={{ marginTop: 14 }}>
+              <div className="landing-hero__actions">
                 <button className="btn primary enter-studio-btn" onClick={enterStudio}>
-                  <span>Enter Studio</span>
-                  <span className="btn-arrow">→</span>
+                  <span>Enter the studio</span>
+                  <Icon name="arrowRight" className="btn-arrow" />
                 </button>
+                <span className="landing-hero__aside">A requirements workspace built around evidence.</span>
+              </div>
+              <div className="landing-hero__metadata">
+                <span>01 <i /> MULTIMODAL SOURCES</span>
+                <span>02 <i /> STRUCTURED REQUIREMENTS</span>
+                <span>03 <i /> TRACEABLE DECISIONS</span>
               </div>
             </div>
-            <aside className="hero-card">
-              <h3>How a run works</h3>
-              <ol className="muted">
-                <li>Ingest multi-modal sources (PDFs, docs, audio notes, wireframes).</li>
-                <li>Parallel specialist agents extract requirements, budget, & risks.</li>
-                <li>Generates interactive system architecture & sequence flowcharts.</li>
-                <li>Compiles clickable prototype, Gherkin test suite, and ripple graph.</li>
-              </ol>
+            <aside className="landing-hero__visual" aria-label="Orbius transforms source fragments into traceable decisions">
+              <div className="landing-hero__visual-top">
+                <span>THE ORBIUS METHOD</span>
+                <span>CONCEPTUAL VIEW</span>
+              </div>
+              <FragmentConvergence />
             </aside>
+            <div className="landing-hero__index" aria-hidden="true">ORBIUS / 01</div>
+          </section>
+
+          <div className="landing-flow-index" aria-label="From source to decision">
+            <span>THE TRANSFORMATION</span>
+            <span>Source material <i>→</i></span>
+            <span>Requirements <i>→</i></span>
+            <span>Evidence <i>→</i></span>
+            <span>Decisions</span>
           </div>
+
+          <div className="landing-story">
+            <ScrollReveal className="landing-story__section landing-story__section--sources">
+              <div className="landing-story__label">
+                <span>01</span>
+                <span>INGEST / MANY FORMATS</span>
+              </div>
+              <div className="landing-story__content">
+                <p className="landing-story__eyebrow">Start with what you have</p>
+                <h2>Project truth rarely arrives in one tidy document.</h2>
+                <p>
+                  Briefs, call notes, spreadsheets, screenshots, and voice recordings each hold part of the picture. Bring them together without losing where each detail came from.
+                </p>
+                <div className="story-source-lines" aria-hidden="true">
+                  <span><b>DOC</b><i>Product brief · 12 pages</i><small>Scope, goals, constraints</small></span>
+                  <span><b>AUD</b><i>Discovery call · 08:42</i><small>Needs, dates, open questions</small></span>
+                  <span><b>IMG</b><i>Checkout sketch · 03 screens</i><small>States, handoffs, edge cases</small></span>
+                </div>
+              </div>
+            </ScrollReveal>
+
+            <ScrollReveal className="landing-story__section landing-story__section--requirements">
+              <div className="landing-story__label">
+                <span>02</span>
+                <span>STRUCTURE / REVIEW</span>
+              </div>
+              <div className="landing-story__content">
+                <p className="landing-story__eyebrow">Make the shape of the work visible</p>
+                <h2>Turn scattered signals into a document your team can reason about.</h2>
+                <p>
+                  Organize generated requirements, risks, conflicts, diagrams, tests, and prototypes in one working surface. Keep uncertainty visible so people know what needs review.
+                </p>
+                <div className="story-document" aria-label="Illustrative requirements excerpt">
+                  <div className="story-document__top"><span>REQUIREMENTS / REVIEW COPY</span><span>OPEN QUESTION</span></div>
+                  <div className="story-document__row"><b>01</b><span>Customer identity must persist across checkout steps.</span><i>Requirement</i></div>
+                  <div className="story-document__row"><b>02</b><span>Delivery timing differs between the brief and call notes.</span><i className="is-review">Needs review</i></div>
+                  <div className="story-document__row"><b>03</b><span>Each generated claim remains linked to its evidence.</span><i>Traceable</i></div>
+                </div>
+                <p className="landing-story__caption">Illustrative content · not generated project data.</p>
+              </div>
+            </ScrollReveal>
+
+            <ScrollReveal className="landing-story__section landing-story__section--evidence">
+              <div className="landing-story__label">
+                <span>03</span>
+                <span>TRACE / DECIDE</span>
+              </div>
+              <div className="landing-story__content">
+                <p className="landing-story__eyebrow">Make every decision inspectable</p>
+                <h2>Follow a requirement back to the words that support it.</h2>
+                <p>
+                  Inspect source excerpts, surface disagreement, and resolve conflicts with a clear review trail. Decisions should be explainable to the people who have to trust them.
+                </p>
+                <div className="story-trace">
+                  <div className="story-trace__claim">
+                    <span>GENERATED REQUIREMENT</span>
+                    <strong>Checkout must retain the customer’s selected delivery window.</strong>
+                  </div>
+                  <div className="story-trace__connector" aria-hidden="true"><span /></div>
+                  <blockquote>
+                    <span>SOURCE EXCERPT / DISCOVERY NOTES</span>
+                    “If someone changes the payment method, keep the delivery slot they already picked.”
+                  </blockquote>
+                </div>
+                <p className="landing-story__caption">Illustrative trace · real workspaces show only evidence returned by the application.</p>
+              </div>
+            </ScrollReveal>
+          </div>
+
+          <section className="landing-capabilities" aria-labelledby="capabilities-title">
+            <div>
+              <p className="landing-story__eyebrow">ONE WORKSPACE / MANY LENSES</p>
+              <h2 id="capabilities-title">Stay with the work from first brief to review.</h2>
+            </div>
+            <div className="landing-capabilities__list">
+              <span>Requirements & conflict review</span>
+              <span>Evidence & source previews</span>
+              <span>Mermaid diagrams</span>
+              <span>Interactive prototype</span>
+              <span>Gherkin test suite</span>
+              <span>Impact analysis & scenarios</span>
+              <span>Meeting signals & decision trace</span>
+              <span>Exports & follow-up actions</span>
+            </div>
+          </section>
+
+          <ScrollReveal as="section" className="landing-endnote">
+            <p className="landing-story__eyebrow">A BETTER WAY TO HOLD COMPLEXITY</p>
+            <h2>Build decisions with their evidence still attached.</h2>
+            <button className="btn primary enter-studio-btn" onClick={enterStudio}>
+              <span>Open Orbius studio</span>
+              <Icon name="arrowRight" className="btn-arrow" />
+            </button>
+          </ScrollReveal>
         </main>
       ) : (
         <main className={`workspace ${isTransitioning ? "transition-exit" : "transition-enter"}`}>
@@ -1968,513 +2097,65 @@ export default function App() {
               <span className="muted">({banner.original_phrase})</span>
             </div>
           )}
-          <section className="panel panel-sources">
-            <div className="vault-header">
-              <h2>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pink-deep)" }}>
-                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                  <line x1="12" y1="22.08" x2="12" y2="12" />
-                </svg>
-                Ingestion Vault
-              </h2>
-              <span className="vault-live-pill">
-                <span className="vault-pulse" /> Active Studio
-              </span>
-            </div>
-
-            <div
-              className={`drop ${uploading ? "uploading" : ""}`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                  onUpload(e.dataTransfer.files);
-                }
-              }}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <div className="drop-icon-container">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pink-deep)" }}>
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" y1="3" x2="12" y2="15" />
-                </svg>
-              </div>
-              <p className="drop-title">
-                {uploading ? "Ingesting & Analyzing Multi-Modal Inputs…" : "Drop Files or Click to Import"}
-              </p>
-              <div className="drop-modalities">
-                <span className="modality-tag">PDF / DOCX</span>
-                <span className="modality-tag">CSV / XLSX</span>
-                <span className="modality-tag">AUDIO NOTES</span>
-                <span className="modality-tag">WIREFRAMES</span>
-              </div>
-              <button
-                type="button"
-                className="btn ghost"
-                style={{ fontSize: "0.78rem", padding: "4px 12px", border: "1px solid color-mix(in srgb, var(--pink) 40%, transparent)" }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  fileInputRef.current?.click();
-                }}
-              >
-                + Browse Vault Files
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  if (e.target.files && e.target.files.length > 0) {
-                    onUpload(e.target.files);
-                  }
-                  e.target.value = "";
-                }}
-              />
-            </div>
-
-            {/* In-Browser Audio Note Studio */}
-            <div className="voice-recorder-widget">
-              <VoiceRecorder onAudioRecorded={onUpload} />
-            </div>
-
-            {/* Attached Sources Vault Cards */}
-            {files.length > 0 && (
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <strong style={{ fontSize: "0.84rem", letterSpacing: "0.01em" }}>Vault Contents ({files.length})</strong>
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    style={{ padding: "2px 8px", fontSize: "0.74rem", color: "var(--danger)" }}
-                    onClick={clearAllFiles}
-                  >
-                    Clear Vault
-                  </button>
-                </div>
-                <ul className="file-list">
-                  {files.map((f, i) => {
-                    const mod = f.modality || "document";
-                    return (
-                      <li key={i} className="file-item" style={{ cursor: "pointer" }} onClick={() => openFilePreview(f.name)} title="Click to preview file content">
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
-                          <span style={{ fontSize: "1rem" }}>
-                            {mod === "audio" ? "🎙️" : mod === "image" ? "🖼️" : mod === "sheet" ? "📊" : "📄"}
-                          </span>
-                          <span style={{ fontWeight: 600, fontSize: "0.82rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {f.name}
-                          </span>
-                          <span className={`file-modality-badge ${mod}`}>
-                            {mod}
-                          </span>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: "0.72rem", color: "var(--pink-deep)", fontWeight: 600, opacity: 0.85 }}>👁️ Preview</span>
-                          <button
-                            type="button"
-                            className="file-remove-btn"
-                            title="Remove file"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeFile(f.name);
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
-
-            {/* Context & Prompt Console */}
-            <div className="context-box">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <label className="muted" style={{ fontSize: "0.78rem", fontWeight: 600 }}>Project Context & Directives</label>
-              </div>
-              <div className="prompt-starter-row">
-                <span
-                  className="prompt-starter-chip"
-                  onClick={() => setDescription((prev) => (prev ? prev + "\n+ Objective: Reduce checkout flow latency by 30%." : "Objective: Reduce checkout flow latency by 30%."))}
-                >
-                  + Checkout SLA
-                </span>
-                <span
-                  className="prompt-starter-chip"
-                  onClick={() => setDescription((prev) => (prev ? prev + "\n+ Mandate: Require PCI-DSS Compliance & 2FA." : "Mandate: Require PCI-DSS Compliance & 2FA."))}
-                >
-                  + PCI & 2FA
-                </span>
-                <span
-                  className="prompt-starter-chip"
-                  onClick={() => setDescription((prev) => (prev ? prev + "\n+ Scope: Multi-currency payments and automatic tax calculations." : "Scope: Multi-currency payments and automatic tax calculations."))}
-                >
-                  + Multi-Currency
-                </span>
-              </div>
-              <textarea
-                className="studio-textarea"
-                rows={4}
-                value={description}
-                placeholder="Type technical requirements, scope constraints, business goals, or stack preferences..."
-                onChange={(e) => setDescription(e.target.value)}
-              />
-              <button className="launch-swarm-btn" disabled={running} onClick={generate}>
-                {running ? (
-                  <>
-                    <span className="vault-pulse" style={{ background: "#1a0f14" }} />
-                    Analyzing Documents & Extracting…
-                  </>
-                ) : (
-                  <>
-                    ⚡ Analyze & Generate BRD
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Analysis Activity Log & Agent Progress */}
-            <div className="swarm-telemetry-header">
-              <h3>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pink-deep)" }}>
-                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                </svg>
-                Live Analysis Activity
-              </h3>
-              <span className="muted" style={{ fontSize: "0.72rem" }}>Agent Progress</span>
-            </div>
-
-            <div className="trace">
-              {(events.length ? events : state?.events || []).map((ev, i) => (
-                <div className="trace-item" key={i}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span className="trace-level-tag">L{ev.level}</span>
-                    <strong style={{ fontSize: "0.8rem", color: "var(--ink)" }}>{formatAgentName(ev.agent)}</strong>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span className="muted" style={{ fontSize: "0.74rem" }}>{ev.task}</span>
-                    <span className="trace-status-pill">{ev.status}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="dev" style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid color-mix(in srgb, var(--line) 40%, transparent)" }}>
-              <button className="btn ghost" style={{ fontSize: "0.75rem", padding: "4px 10px" }} onClick={ff}>
-                ⏩ Fast-forward 30d
-              </button>
-              <button className="btn ghost" style={{ fontSize: "0.75rem", padding: "4px 10px" }} onClick={() => toggleQuota(!simulate)}>
-                {simulate ? "⚠️ Quota Sim ACTIVE" : "🧪 Sim Quota Fail"}
-              </button>
-            </div>
-            {clock && (
-              <p className="muted" style={{ fontSize: "0.7rem", margin: 0, textAlign: "center" }}>
-                Clock: {new Date(clock.now).toUTCString()} (+{Math.round(clock.offset_days || 0)}d)
-              </p>
-            )}
-          </section>
-
-          {/* Center Studio Panel with Multi-Mode Tabs */}
-          <section className="panel panel-brd">
-            <div className="studio-nav-bar">
-              <button
-                type="button"
-                className={`studio-nav-btn ${studioCenterTab === "brd" ? "active" : ""}`}
-                onClick={() => setStudioCenterTab("brd")}
-              >
-                📄 BRD Document
-              </button>
-              <button
-                type="button"
-                className={`studio-nav-btn ${studioCenterTab === "prototype" ? "active" : ""}`}
-                onClick={() => setStudioCenterTab("prototype")}
-              >
-                📱 Clickable Prototype
-              </button>
-              <button
-                type="button"
-                className={`studio-nav-btn ${studioCenterTab === "tests" ? "active" : ""}`}
-                onClick={() => setStudioCenterTab("tests")}
-              >
-                🧪 Test Suite & Gherkin
-              </button>
-              <button
-                type="button"
-                className={`studio-nav-btn ${studioCenterTab === "ripple" ? "active" : ""}`}
-                onClick={() => setStudioCenterTab("ripple")}
-              >
-                🕸️ Impact Ripple Graph
-              </button>
-              <button
-                type="button"
-                className={`studio-nav-btn ${studioCenterTab === "meeting" ? "active" : ""}`}
-                onClick={() => setStudioCenterTab("meeting")}
-              >
-                🎙️ Live Meeting Mode
-              </button>
-              <button
-                type="button"
-                className={`studio-nav-btn ${studioCenterTab === "trace" ? "active" : ""}`}
-                onClick={() => setStudioCenterTab("trace")}
-              >
-                ⏳ Decision Trace
-              </button>
-            </div>
-
-            {studioCenterTab === "prototype" ? (
-              <InteractivePrototype findings={state?.findings || []} chunks={state?.chunks || []} />
-            ) : studioCenterTab === "tests" ? (
-              <GherkinTestCases sessionId={SESSION} />
-            ) : studioCenterTab === "ripple" ? (
-              <ImpactRippleGraph sessionId={SESSION} />
-            ) : studioCenterTab === "meeting" ? (
-              <LiveMeetingMode sessionId={SESSION} onNewFinding={() => { }} />
-            ) : studioCenterTab === "trace" ? (
-              <DecisionTraceTimeline events={state?.events || events} router={router} state={state} />
-            ) : (
-              /* Default BRD Document View */
-              <div>
-                <h2>Business requirements</h2>
-                {running && (
-                  <div className="live-indicator">
-                    <span className="live-dot" />
-                    Specialist agents orchestrating requirements & resolving conflicts…
-                  </div>
-                )}
-                {!running && sections.length === 0 && (!state?.sections || state.sections.length === 0) && (
-                  <div className="card" style={{ textAlign: "center", padding: "40px 24px", margin: "18px 0" }}>
-                    <div style={{ fontSize: "2.6rem", marginBottom: 10 }}>📋</div>
-                    <h3 style={{ margin: "0 0 6px" }}>No Requirements Generated Yet</h3>
-                    <p className="muted" style={{ fontSize: "0.85rem", maxWidth: 400, margin: "0 auto 14px" }}>
-                      Attach project files (PDFs, Word, Sheets, Emails, Images, Audio) or provide project notes on the left panel, then click <strong>Generate BRD</strong>.
-                    </p>
-                  </div>
-                )}
-                {(sections.length ? sections : state?.sections || []).map((section) => (
-                  <article key={section.id} style={{ marginBottom: 18 }}>
-                    <h3>{section.title}</h3>
-
-                    {/* FEATURE: Mermaid Architecture & Visual Flowcharts */}
-                    {section.id === "diagrams" ? (
-                      <MermaidViewer section={section} findings={state?.findings || []} chunks={state?.chunks || []} />
-                    ) : section.id === "open_conflicts" ? (
-                      (state?.conflicts || []).map((c) => (
-                        <div className="conflict" key={c.id}>
-                          <strong>{c.status === "open" ? "Pending Conflict" : "Resolved"} — {c.topic}</strong>
-                          <p>{c.disagreement}</p>
-                          <div className="split">
-                            <div>
-                              <em>Source A</em>
-                              <p>{c.left.statement}</p>
-                            </div>
-                            <div>
-                              <em>Source B</em>
-                              <p>{c.right.statement}</p>
-                            </div>
-                          </div>
-                          <p className="muted">{c.suggested_question}</p>
-                          {c.status === "open" && (
-                            <div className="row">
-                              <button className="btn" onClick={() => resolveConflict(c.id, "left")}>
-                                Keep Source A
-                              </button>
-                              <button className="btn primary" onClick={() => resolveConflict(c.id, "right")}>
-                                Keep Source B
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      (state?.findings || [])
-                        .filter((f) => section.finding_ids?.includes(f.id))
-                        .map((f) => (
-                          <div className="brd-line" key={f.id} onClick={() => openEvidence(f.id)}>
-                            {f.statement}
-                          </div>
-                        ))
-                    )}
-                    {!state && section.id !== "diagrams" && <div className="section-body">{section.body}</div>}
-                  </article>
-                ))}
-                {running && sections.length === 0 && (
-                  <div style={{ marginTop: 12 }}>
-                    <div className="skeleton-box" style={{ padding: 16 }}>
-                      <div className="skeleton-box skeleton-title" />
-                      <div className="skeleton-box skeleton-line" />
-                      <div className="skeleton-box skeleton-line" />
-                      <div className="skeleton-box skeleton-line short" />
-                    </div>
-                  </div>
-                )}
-                {state?.questions?.length ? (
-                  <div className="card">
-                    <strong>Human in the loop</strong>
-                    {state.questions.map((q, i) => (
-                      <p key={i}>{q}</p>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </section>
-
-          <aside className="panel panel-actions">
-            <h2>Action Center</h2>
-            <div className="tabs">
-              <button className="btn" aria-selected={tab === "inbox"} onClick={() => setTab("inbox")}>
-                Inbox
-              </button>
-              <button className="btn" aria-selected={tab === "timeline"} onClick={() => setTab("timeline")}>
-                Timeline
-              </button>
-              <button className="btn" aria-selected={tab === "calendar"} onClick={() => setTab("calendar")}>
-                Calendar 📅
-              </button>
-            </div>
-
-            {tab === "calendar" ? (
-              <div className="calendar-widget">
-                <div className="calendar-header">
-                  <strong>Calendar View</strong>
-                  <span className="muted">{selectedDate}</span>
-                </div>
-                <div className="calendar-days-header">
-                  <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
-                </div>
-                <div className="calendar-grid">
-                  {daysInMonth.map((d) => (
-                    <div
-                      key={d.day}
-                      className={`calendar-cell ${selectedDate === d.dateStr ? "selected" : ""}`}
-                      onClick={() => setSelectedDate(d.dateStr)}
-                    >
-                      {d.day}
-                      {(d.hasUrgent || d.hasWarning || d.hasNormal) && (
-                        <div className="dot-indicator">
-                          {d.hasUrgent && <span className="dot-urgent" />}
-                          {d.hasWarning && <span className="dot-warning" />}
-                          {d.hasNormal && <span className="dot-normal" />}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ marginTop: 16 }}>
-                  <h4 style={{ margin: "0 0 10px", fontSize: "0.9rem" }}>
-                    Tasks & Alerts for {selectedDate} ({selectedDateEvents.length})
-                  </h4>
-                  {selectedDateEvents.length === 0 ? (
-                    <p className="muted" style={{ fontSize: "0.85rem" }}>No tasks or alerts scheduled for this date.</p>
-                  ) : (
-                    selectedDateEvents.map((ev) => (
-                      <div className="card" key={ev.id} style={{ padding: 12 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                          <strong>{ev.title}</strong>
-                          {ev.urgency === "urgent" && <span className="badge-urgent">🔴 Urgent / Due Today</span>}
-                          {ev.urgency === "due_tomorrow" && <span className="badge-warning">🟠 Due Tomorrow</span>}
-                          {ev.urgency === "completed" && <span className="badge-completed">🟢 Completed</span>}
-                        </div>
-                        <p style={{ fontSize: "0.85rem", margin: "4px 0" }}>{ev.detail}</p>
-                        {ev.source_span && <p className="muted" style={{ fontSize: "0.75rem" }}>Phrase: {ev.source_span}</p>}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            ) : tab === "inbox" ? (
-              drafts.map((t) => {
-                const isUrgent = t.status === "pending";
-                return (
-                  <div className="card" key={t.id}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <strong>{t.payload?.subject || t.context}</strong>
-                      {isUrgent && <span className="badge-urgent">🔴 Action Required</span>}
-                    </div>
-                    <p className="muted">{t.payload?.recipient}</p>
-                    <p>{t.payload?.body}</p>
-                    <p className="muted">Evidence · {t.source_span}</p>
-                    {t.status === "pending" ? (
-                      <div className="row">
-                        <button className="btn primary" onClick={() => act(t, "approved")}>
-                          Approve & Send
-                        </button>
-                        <button className="btn" onClick={() => act(t, "dismissed")}>
-                          Dismiss
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="muted">Status: {t.status}</p>
-                    )}
-                  </div>
-                );
-              })
-            ) : (
-              alerts.map((a) => {
-                const isFired = a.status === "fired";
-                return (
-                  <div className="card" key={a.id}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <strong>{a.context}</strong>
-                      {isFired ? (
-                        <span className="badge-urgent">🔴 Fired / Urgent</span>
-                      ) : (
-                        <span className="badge-warning">🟠 Scheduled</span>
-                      )}
-                    </div>
-                    <p>
-                      {a.target_date} · <em>{a.original_phrase}</em>
-                    </p>
-                    <p>{a.reminder_message}</p>
-                    <p className="muted">Status: {a.status}</p>
-                  </div>
-                );
-              })
-            )}
-
-            {!drafts.length && tab === "inbox" && (
-              <p className="muted">No drafts yet. Ingest documents and click 'Generate BRD' to detect action items.</p>
-            )}
-
-            {state?.changelog && (
-              <p className="muted" style={{ marginTop: 12 }}>
-                Version {state.version} · {state.changelog.at(-1)?.summary}
-              </p>
-            )}
-
-            {/* FEATURE 3: Jira, Linear, PDF, Word Exporter */}
-            {state && (
-              <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 14 }}>
-                <p style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Export Deliverables</p>
-                <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-                  <a className="btn" href={`/api/export/${SESSION}`} download>
-                    Markdown
-                  </a>
-                  <a className="btn primary" href={`/api/export/${SESSION}/pdf`} download>
-                    PDF
-                  </a>
-                  <a className="btn" href={`/api/export/${SESSION}/docx`} download>
-                    Word (.docx)
-                  </a>
-                  <a className="btn" href={`/api/export/${SESSION}/jira`} download title="Export issues for Jira import">
-                    🔷 Jira (CSV)
-                  </a>
-                  <a className="btn" href={`/api/export/${SESSION}/linear`} download title="Export issues for Linear import">
-                    ⚡ Linear (JSON)
-                  </a>
-                </div>
-              </div>
-            )}
+          <aside className="workspace-sidebar">
+            <SourceVault
+              files={files}
+              uploading={uploading}
+              onUpload={onUpload}
+              onPreviewFile={openFilePreview}
+              onRemoveFile={removeFile}
+              onClearFiles={clearAllFiles}
+              description={description}
+              onDescriptionChange={setDescription}
+              running={running}
+              onGenerate={generate}
+              VoiceRecorder={VoiceRecorder}
+            />
+            <AnalysisTrace
+              events={events.length ? events : state?.events || []}
+              running={running}
+              router={router}
+              routerStatus={routingStatusLabel(router)}
+              clock={clock}
+              simulate={simulate}
+              onFastForward={ff}
+              onToggleSimulation={() => toggleQuota(!simulate)}
+              formatAgentName={formatAgentName}
+            />
           </aside>
+
+          <RequirementsDocument
+            activeTab={studioCenterTab}
+            onTabChange={setStudioCenterTab}
+            sections={sections}
+            state={state}
+            running={running}
+            theme={theme}
+            views={{
+              prototype: <InteractivePrototype findings={state?.findings || []} chunks={state?.chunks || []} />,
+              tests: <GherkinTestCases sessionId={SESSION} />,
+              ripple: <ImpactRippleGraph sessionId={SESSION} />,
+              meeting: <LiveMeetingMode sessionId={SESSION} onNewFinding={() => { }} />,
+              trace: <DecisionTraceTimeline events={state?.events || events} router={router} state={state} />,
+            }}
+            onOpenEvidence={openEvidence}
+            onResolveConflict={resolveConflict}
+            selectedFindingId={evidence?.findingId}
+          />
+
+          <ActionCenter
+            tab={tab}
+            onTabChange={setTab}
+            days={daysInMonth}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+            selectedEvents={selectedDateEvents}
+            drafts={drafts}
+            alerts={alerts}
+            state={state}
+            sessionId={SESSION}
+            onAct={act}
+          />
         </main>
       )}
 
@@ -2486,15 +2167,16 @@ export default function App() {
           onClick={() => setShowCopilot(!showCopilot)}
           title="Open BRD AI Copilot"
         >
-          <span>💬 Ask Copilot</span>
-          <span className="copilot-sparkle">✨</span>
+          <span><Icon name="message" /> Ask Copilot</span>
+          <Icon name="sparkle" className="copilot-sparkle" />
         </button>
       )}
 
       <CopilotDrawer
         isOpen={showCopilot}
         onClose={() => setShowCopilot(false)}
-        onOpenEvidence={openEvidence}
+        onOpenEvidence={openCopilotEvidence}
+        sourceChunks={state?.chunks || []}
       />
 
       {/* FEATURE 5: What-If Scenario Simulator Modal */}
@@ -2506,28 +2188,40 @@ export default function App() {
       {/* Email Dispatch Confirmation Modal */}
       {emailDispatchModal && (
         <div className="auth-overlay" onClick={() => setEmailDispatchModal(null)}>
-          <div className="auth-card" style={{ width: "min(520px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
+          <div className="auth-card" role="dialog" aria-modal="true" aria-labelledby="draft-approval-title" style={{ width: "min(520px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, color: "var(--ink)" }}>
-                <span>📬</span> Direct Email Dispatch Confirmed
+              <h3 id="draft-approval-title" style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, color: "var(--ink)" }}>
+                Task approval result
               </h3>
-              <button className="file-remove-btn" onClick={() => setEmailDispatchModal(null)}>✕</button>
+              <button className="file-remove-btn" data-modal-initial-focus onClick={() => setEmailDispatchModal(null)} aria-label="Close approval details">✕</button>
             </div>
 
             <div style={{ background: "color-mix(in srgb, var(--elev-2) 80%, transparent)", padding: 14, borderRadius: 14, border: "1px solid var(--line)", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: 8 }}>
-              <div><strong style={{ color: "var(--muted)" }}>From:</strong> {user?.email || "qurie@orbius.ai"} (Authenticated Sender)</div>
-              <div><strong style={{ color: "var(--muted)" }}>To:</strong> {emailDispatchModal.recipient}</div>
+              <div><strong style={{ color: "var(--muted)" }}>Prepared for:</strong> {emailDispatchModal.recipient}</div>
               <div><strong style={{ color: "var(--muted)" }}>Subject:</strong> {emailDispatchModal.subject}</div>
-              <div><strong style={{ color: "var(--muted)" }}>Status:</strong> <span style={{ color: "#34d399", fontWeight: 700 }}>⚡ Delivered & Recorded</span></div>
+              <div><strong style={{ color: "var(--muted)" }}>Status:</strong> <span className={emailDispatchModal.sent ? "status-confirmed" : "status-unconfirmed"}>
+                {!emailDispatchModal.actionConfirmed
+                  ? "Approval not confirmed"
+                  : emailDispatchModal.sent
+                    ? `Delivery confirmed · ${emailDispatchModal.method}`
+                    : emailDispatchModal.method === "simulated"
+                      ? "Approved · dispatch simulated · not sent"
+                      : "Approved · delivery unconfirmed"}
+              </span></div>
               <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "4px 0" }} />
               <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, background: "var(--bg)", padding: 12, borderRadius: 10, border: "1px solid var(--line)" }}>
                 {emailDispatchModal.body}
               </div>
             </div>
 
-            <div style={{ marginTop: 14, padding: 12, borderRadius: 12, background: "rgba(59, 130, 246, 0.12)", border: "1px solid rgba(59, 130, 246, 0.3)", fontSize: "0.78rem" }}>
-              <strong>💡 Direct Gmail / Email Account Integration:</strong><br />
-              Currently operating in <strong>Studio Dispatch Mode</strong>. To send emails directly from your personal Gmail or Outlook address in production, you can link <strong>Gmail API OAuth</strong> (`gmail.send` scope) or <strong>SMTP API credentials</strong>.
+            <div className="dispatch-note">
+              {!emailDispatchModal.actionConfirmed
+                ? "The approval request did not return a confirmation. Refresh the task state before relying on this result."
+                : emailDispatchModal.sent
+                  ? "The backend confirmed delivery for this task."
+                  : emailDispatchModal.method === "simulated"
+                    ? "The task was approved, but the backend reports that no email was sent. Configure a dispatch provider to enable delivery."
+                    : "The task was approved, but the response did not confirm whether an email was delivered."}
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
@@ -2537,56 +2231,13 @@ export default function App() {
         </div>
       )}
 
-      {/* File Vault Inspector & Content Preview Modal */}
-      {filePreviewModal && (
-        <div className="auth-overlay" onClick={() => setFilePreviewModal(null)}>
-          <div className="auth-card" style={{ width: "min(680px, 95vw)" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis" }}>
-                <span>📄</span> {filePreviewModal.filename}
-              </h3>
-              <button className="file-remove-btn" onClick={() => setFilePreviewModal(null)}>✕</button>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <span className={`file-modality-badge ${filePreviewModal.modality || "document"}`}>
-                {filePreviewModal.modality || "document"}
-              </span>
-              <span className="chip" style={{ fontSize: "0.72rem" }}>
-                {filePreviewModal.chunk_count || 1} Chunk(s) Ingested
-              </span>
-            </div>
-
-            <div style={{ maxHeight: "55vh", overflowY: "auto", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 14, padding: 14, fontFamily: "monospace", fontSize: "0.84rem", whiteSpace: "pre-wrap", lineHeight: 1.6, color: "var(--ink)" }}>
-              {filePreviewModal.full_text || "No text content preview available for this file."}
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
-              <button
-                type="button"
-                className="btn ghost"
-                style={{ color: "var(--danger)", fontSize: "0.8rem" }}
-                onClick={() => {
-                  removeFile(filePreviewModal.filename);
-                  setFilePreviewModal(null);
-                }}
-              >
-                🗑️ Remove File
-              </button>
-              <button className="btn primary" onClick={() => setFilePreviewModal(null)}>
-                Close Preview
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Auth Modal */}
       {showAuthModal && (
         <div className="auth-overlay">
-          <div className="auth-card">
+          <div className="auth-card" role="dialog" aria-modal="true" aria-label="Account sign in">
             <div className="auth-tabs">
               <button
+                data-modal-initial-focus
                 className={authMode === "login" ? "active" : ""}
                 onClick={() => {
                   setAuthMode("login");
@@ -2664,7 +2315,7 @@ export default function App() {
                     }}
                     title={showPassword ? "Hide password" : "Show password"}
                   >
-                    {showPassword ? "👁️" : "🔒"}
+                    {showPassword ? "Hide" : "Show"}
                   </button>
                 </div>
               </div>
@@ -2681,24 +2332,7 @@ export default function App() {
         </div>
       )}
 
-      {evidence && (
-        <div className="drawer">
-          <strong>Evidence & Source Chunk</strong>
-          <p>{evidence.finding?.statement}</p>
-          <p className="muted">
-            {formatAgentName(evidence.finding?.agent)} · confidence {Math.round((evidence.finding?.confidence || 0) * 100)}%
-          </p>
-          <p>
-            {evidence.chunk?.file_name} · {evidence.chunk?.page_or_ts}
-          </p>
-          <p style={{ fontSize: "0.85rem", maxHeight: 180, overflowY: "auto", background: "var(--elev)", padding: 8, borderRadius: 8 }}>
-            {evidence.finding?.source_span || evidence.chunk?.text}
-          </p>
-          <button className="btn" onClick={() => setEvidence(null)}>
-            Close
-          </button>
-        </div>
-      )}
+      <EvidenceInspector evidence={evidence} onClose={() => setEvidence(null)} />
       {toast && <div className="drawer" style={{ left: 16, right: "auto" }}>{toast}</div>}
     </div>
   );

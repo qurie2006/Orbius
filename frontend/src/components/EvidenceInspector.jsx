@@ -75,7 +75,7 @@ export default function EvidenceInspector({ evidence, onClose }) {
           <span className="evidence-drawer__section-label">
             {finding ? "SOURCE EXCERPT" : "CITED SOURCE EXCERPT"}
           </span>
-          <blockquote className="evidence-source-excerpt">{excerpt}</blockquote>
+          <blockquote className="evidence-source-excerpt citation">“{excerpt}”</blockquote>
         </section>
       )}
       {!location && !excerpt && (

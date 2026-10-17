@@ -55,12 +55,12 @@ function ConflictReview({ conflict, onResolve }) {
       <p>{conflict.disagreement}</p>
       <div className="split">
         <div>
-          <em>Source A</em>
-          <p>{conflict.left.statement}</p>
+          <em className="metadata-italic text-secondary">Source A</em>
+          <blockquote className="citation font-citation italic text-sm my-2">“{conflict.left.statement}”</blockquote>
         </div>
         <div>
-          <em>Source B</em>
-          <p>{conflict.right.statement}</p>
+          <em className="metadata-italic text-secondary">Source B</em>
+          <blockquote className="citation font-citation italic text-sm my-2">“{conflict.right.statement}”</blockquote>
         </div>
       </div>
       {conflict.suggested_question && <p className="muted">{conflict.suggested_question}</p>}

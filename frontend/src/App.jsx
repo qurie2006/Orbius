@@ -1035,18 +1035,18 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence, sessionId }) {
 
             {/* Sources & Citations */}
             {m.sources && m.sources.length > 0 && (
-              <div className="mt-2.5 pt-2 border-t border-white/[0.06] flex flex-wrap gap-1.5">
-                <span className="font-label-mono text-[10px] text-outline shrink-0 flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[12px] text-secondary">database</span>
-                  <span>Sources:</span>
+              <div className="mt-2.5 pt-2 border-t border-white/[0.06] flex flex-wrap gap-1.5 items-center">
+                <span className="font-label-mono text-[10px] text-outline shrink-0 flex items-center gap-1 italic">
+                  <span className="material-symbols-outlined text-[12px] text-secondary">format_quote</span>
+                  <span>Citations:</span>
                 </span>
                 {m.sources.map((s, si) => (
                   <span
                     key={si}
-                    className="font-label-mono text-[10px] px-2 py-0.5 rounded bg-surface-container-high text-secondary border border-secondary/20"
+                    className="font-citation italic text-[11px] px-2.5 py-0.5 rounded bg-surface-container-high text-secondary border border-secondary/20 hover:border-secondary/40 transition-colors"
                     title={s.snippet || "Retrieved context chunk"}
                   >
-                    {s.file_name}
+                    “{s.file_name}”
                   </span>
                 ))}
               </div>
@@ -2125,9 +2125,9 @@ function InlineConflictStudio({ conflicts, onResolve, openEvidence }) {
                   </div>
                   <p className="text-xs text-primary font-medium mb-3 leading-relaxed">{leftStmt}</p>
                   {leftSource && (
-                    <div className="p-2.5 rounded bg-surface-container-lowest text-[11px] text-on-surface-variant italic border-l-2 border-secondary mb-3 leading-relaxed">
-                      "{leftSource}"
-                    </div>
+                    <blockquote className="p-3 rounded bg-surface-container-lowest text-[12px] text-on-surface-variant font-citation italic border-l-2 border-secondary mb-3 leading-relaxed quotation-bubble">
+                      “{leftSource}”
+                    </blockquote>
                   )}
                 </div>
 
@@ -2136,10 +2136,10 @@ function InlineConflictStudio({ conflicts, onResolve, openEvidence }) {
                     <button
                       type="button"
                       onClick={() => openEvidence(conf.left.id)}
-                      className="text-[11px] text-outline hover:text-secondary font-label-mono flex items-center gap-1"
+                      className="text-[11px] text-outline hover:text-secondary font-label-mono flex items-center gap-1.5 transition-colors"
                     >
                       <span className="material-symbols-outlined text-[14px]">find_in_page</span>
-                      <span>View Citation</span>
+                      <span className="font-citation italic font-medium">View Citation</span>
                     </button>
                   ) : <div />}
                   <button
@@ -2176,9 +2176,9 @@ function InlineConflictStudio({ conflicts, onResolve, openEvidence }) {
                   </div>
                   <p className="text-xs text-primary font-medium mb-3 leading-relaxed">{rightStmt}</p>
                   {rightSource && (
-                    <div className="p-2.5 rounded bg-surface-container-lowest text-[11px] text-on-surface-variant italic border-l-2 border-secondary mb-3 leading-relaxed">
-                      "{rightSource}"
-                    </div>
+                    <blockquote className="p-3 rounded bg-surface-container-lowest text-[12px] text-on-surface-variant font-citation italic border-l-2 border-secondary mb-3 leading-relaxed quotation-bubble">
+                      “{rightSource}”
+                    </blockquote>
                   )}
                 </div>
 
@@ -2187,10 +2187,10 @@ function InlineConflictStudio({ conflicts, onResolve, openEvidence }) {
                     <button
                       type="button"
                       onClick={() => openEvidence(conf.right.id)}
-                      className="text-[11px] text-outline hover:text-secondary font-label-mono flex items-center gap-1"
+                      className="text-[11px] text-outline hover:text-secondary font-label-mono flex items-center gap-1.5 transition-colors"
                     >
                       <span className="material-symbols-outlined text-[14px]">find_in_page</span>
-                      <span>View Citation</span>
+                      <span className="font-citation italic font-medium">View Citation</span>
                     </button>
                   ) : <div />}
                   <button
@@ -4489,13 +4489,13 @@ export default function App() {
             </div>
 
             <div className="p-4 rounded bg-surface-container-lowest border border-white/[0.06] space-y-2">
-              <div className="flex items-center justify-between font-label-mono text-[10px] text-outline">
+              <div className="flex items-center justify-between font-label-mono text-[10px] text-outline italic">
                 <span>FILE: {evidence.chunk?.file_name}</span>
                 <span>EXCERPT #{evidence.chunk?.source_id}</span>
               </div>
-              <div className="text-xs text-on-surface-variant font-label-mono leading-relaxed bg-surface-container p-3 rounded overflow-y-auto max-h-64 whitespace-pre-wrap">
-                {evidence.chunk?.text}
-              </div>
+              <blockquote className="evidence-source-excerpt citation font-citation text-xs text-on-surface-variant italic leading-relaxed bg-surface-container p-3.5 rounded border-l-2 border-secondary overflow-y-auto max-h-64 whitespace-pre-wrap">
+                “{evidence.chunk?.text}”
+              </blockquote>
             </div>
           </div>
           <button

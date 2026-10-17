@@ -177,6 +177,26 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     return dict(row)
 
 
+def update_password(email: str, new_password: str) -> bool:
+    """Updates user password using cryptographically salted PBKDF2 HMAC-SHA256."""
+    hashed, salt = hash_password(new_password)
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE users SET password_hash = ?, salt = ? WHERE LOWER(email) = ?",
+            (hashed, salt, email.lower().strip()),
+        )
+        return cur.rowcount > 0
+
+
+def get_session_owner(session_id: str) -> Optional[str]:
+    """Retrieves the owner user_id for a given session, or None if public/unbound."""
+    with connect() as conn:
+        row = conn.execute("SELECT user_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    if not row:
+        return None
+    return row["user_id"]
+
+
 def upsert_task(task: Task, user_id: Optional[str] = None) -> None:
     with connect() as conn:
         conn.execute(
@@ -306,10 +326,13 @@ def save_session(session_id: str, payload: Dict, user_id: Optional[str] = None) 
 
 def load_session(session_id: str) -> dict:
     with connect() as conn:
-        row = conn.execute("SELECT context_json FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        row = conn.execute("SELECT context_json, user_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
     if not row:
         return {}
-    return json.loads(row["context_json"])
+    data = json.loads(row["context_json"])
+    if row["user_id"]:
+        data["user_id"] = row["user_id"]
+    return data
 
 
 def get_user_sessions(user_id: str) -> list[dict]:

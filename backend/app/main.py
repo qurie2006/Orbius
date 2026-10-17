@@ -20,10 +20,13 @@ from app.ingestion import ingest_bytes
 from app.model_router import current as router_current, set_active_model as router_set_active_model
 from app.model_router import set_simulate
 from app.pipeline import SESSIONS, load_demo_chunks, run_pipeline
+from app.rate_limiter import RateLimitMiddleware
+from app.file_security import validate_file_upload, sanitize_filename, MAX_FILE_BYTES, MAX_BATCH_BYTES
 from app.schemas import (
     ChatRequest,
     Finding,
     LoginRequest,
+    ResetPasswordRequest,
     ResolveConflictRequest,
     ScenarioRequest,
     SignUpRequest,
@@ -47,6 +50,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Add sliding-window tiered rate limiter
+app.add_middleware(RateLimitMiddleware)
 
 db.init_db()
 UPLOADS: dict[str, list] = {}
@@ -66,6 +71,40 @@ def get_auth_user(authorization: Optional[str] = Header(None), x_user_id: Option
     return db.get_user_by_id(user_id)
 
 
+def get_tenant_folder(session_id: str, user: Optional[dict] = None) -> str:
+    """Returns an isolated disk folder and cache namespace for the user/tenant."""
+    if user and user.get("id"):
+        return f"usr_{user['id']}"
+    # Anonymous isolated workspace namespace
+    return f"anon_{session_id}"
+
+
+def check_session_access(session_id: str, user: Optional[dict] = None) -> bool:
+    """Multi-tenant security check: verifies that the caller owns this workspace.
+    Prevents User B from accessing or mutating User A's files and BRD data."""
+    if session_id == "demo":
+        return True
+    owner_id = db.get_session_owner(session_id)
+    if not owner_id:
+        # Public or unassigned session
+        return True
+    if not user or user.get("id") != owner_id:
+        return False
+    return True
+
+
+def get_uploads_cache(session_id: str, user: Optional[dict] = None) -> list:
+    """Retrieves uploaded chunks from tenant-isolated in-memory cache."""
+    cache_key = f"{get_tenant_folder(session_id, user)}:{session_id}"
+    return UPLOADS.get(cache_key, [])
+
+
+def set_uploads_cache(session_id: str, chunks: list, user: Optional[dict] = None) -> None:
+    """Persists uploaded chunks into tenant-isolated in-memory cache."""
+    cache_key = f"{get_tenant_folder(session_id, user)}:{session_id}"
+    UPLOADS[cache_key] = chunks
+
+
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 def health():
     return {"ok": True, "name": "Orbius", "now": get_now().isoformat()}
@@ -73,6 +112,10 @@ def health():
 
 @app.post("/api/auth/signup")
 def signup(req: SignUpRequest):
+    if len(req.password.strip()) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters long for security."}, status_code=400)
+    if not req.email.strip() or "@" not in req.email:
+        return JSONResponse({"error": "A valid email address is required."}, status_code=400)
     existing = db.get_user_by_email(req.email)
     if existing:
         return JSONResponse({"error": "An account with this email already exists."}, status_code=400)
@@ -92,6 +135,19 @@ def login(req: LoginRequest):
     return {"user": user_data, "token": token}
 
 
+@app.post("/api/auth/reset-password")
+def reset_password(req: ResetPasswordRequest):
+    if len(req.new_password.strip()) < 8:
+        return JSONResponse({"error": "New password must be at least 8 characters long."}, status_code=400)
+    user = db.get_user_by_email(req.email)
+    if not user:
+        return JSONResponse({"error": "Account not found with this email."}, status_code=404)
+    success = db.update_password(req.email, req.new_password)
+    if not success:
+        return JSONResponse({"error": "Failed to update password."}, status_code=500)
+    return {"status": "ok", "message": "Password successfully reset with salted PBKDF2 hash."}
+
+
 @app.get("/api/auth/me")
 def get_me(authorization: Optional[str] = Header(None), x_user_id: Optional[str] = Header(None)):
     user = get_auth_user(authorization, x_user_id)
@@ -106,6 +162,7 @@ def user_sessions(authorization: Optional[str] = Header(None), x_user_id: Option
     if not user:
         return []
     return db.get_user_sessions(user["id"])
+
 
 
 
@@ -195,34 +252,47 @@ async def upload(
 ):
     user = get_auth_user(authorization, x_user_id)
     session_id = session_id_query if session_id_query and session_id == "demo" else session_id
-    existing = UPLOADS.get(session_id, [])
-    dest_dir = settings.upload_dir / session_id
+
+    # Security check: Ensure caller has permission to upload to this session
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not own this workspace."}, status_code=403)
+
+    tenant_folder = get_tenant_folder(session_id, user)
+    existing = get_uploads_cache(session_id, user)
+    dest_dir = settings.upload_dir / tenant_folder / session_id
     dest_dir.mkdir(parents=True, exist_ok=True)
     new_chunks = []
     new_names = set()
+    total_batch_size = 0
 
     for f in files:
-        safe_name = Path(f.filename or "upload").name
-        ext = Path(safe_name).suffix.lower()
-        if ext not in ALLOWED_EXTENSIONS:
-            return JSONResponse({"error": f"File type '{ext}' is not permitted."}, status_code=400)
         data = await f.read()
-        if len(data) > MAX_FILE_BYTES:
-            return JSONResponse({"error": f"File '{safe_name}' exceeds 25MB maximum limit."}, status_code=400)
+        total_batch_size += len(data)
+        if total_batch_size > MAX_BATCH_BYTES:
+            return JSONResponse(
+                {"error": f"Total batch upload exceeds maximum allowed size of {MAX_BATCH_BYTES // (1024 * 1024)}MB."},
+                status_code=400,
+            )
+
+        # Deep Security Validation (magic bytes, path traversal sanitization, dangerous extension blocking)
+        is_valid, safe_name, sec_err = validate_file_upload(f.filename or "upload", data)
+        if not is_valid:
+            return JSONResponse({"error": sec_err}, status_code=400)
+
         path = dest_dir / safe_name
         file_chunks = ingest_bytes(safe_name, data, path)
         new_chunks.extend(file_chunks)
         new_names.add(safe_name)
 
-    # Merge with existing files
+    # Merge with existing files for this tenant
     merged_chunks = [c for c in existing if c.file_name not in new_names] + new_chunks
-    UPLOADS[session_id] = merged_chunks
+    set_uploads_cache(session_id, merged_chunks, user)
     db.reset_ops(user["id"] if user else None)
 
     # Automatically index all chunks into Vector Database
     try:
         from app.vector_store import vector_store
-        vector_store.add_chunks(session_id, merged_chunks)
+        vector_store.add_chunks(f"{tenant_folder}_{session_id}", merged_chunks)
     except Exception:
         pass
 
@@ -245,11 +315,20 @@ async def upload(
 
 
 @app.delete("/api/upload/{session_id}/{filename}")
-def delete_file(session_id: str, filename: str):
-    safe_name = Path(filename).name
-    existing = UPLOADS.get(session_id, [])
+def delete_file(
+    session_id: str,
+    filename: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not own this workspace."}, status_code=403)
+
+    safe_name = sanitize_filename(filename)
+    existing = get_uploads_cache(session_id, user)
     merged = [c for c in existing if c.file_name != safe_name]
-    UPLOADS[session_id] = merged
+    set_uploads_cache(session_id, merged, user)
     unique_files = []
     seen = set()
     for c in merged:
@@ -267,19 +346,39 @@ def delete_file(session_id: str, filename: str):
 
 
 @app.delete("/api/upload/{session_id}")
-def clear_files(session_id: str):
-    UPLOADS[session_id] = []
+def clear_files(
+    session_id: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not own this workspace."}, status_code=403)
+
+    set_uploads_cache(session_id, [], user)
     return {"files": [], "count": 0}
 
 
 @app.get("/api/upload/{session_id}/preview/{filename}")
-def preview_file(session_id: str, filename: str):
-    safe_name = Path(filename).name
-    chunks = UPLOADS.get(session_id, [])
+def preview_file(
+    session_id: str,
+    filename: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not own this workspace."}, status_code=403)
+
+    safe_name = sanitize_filename(filename)
+    chunks = get_uploads_cache(session_id, user)
     file_chunks = [c for c in chunks if c.file_name == safe_name]
 
     if not file_chunks:
-        dest_path = settings.upload_dir / session_id / safe_name
+        tenant_folder = get_tenant_folder(session_id, user)
+        dest_path = settings.upload_dir / tenant_folder / session_id / safe_name
+        if not dest_path.exists():
+            dest_path = settings.upload_dir / session_id / safe_name
         if not dest_path.exists():
             dest_path = Path(__file__).resolve().parent.parent / safe_name
         if dest_path.exists():
@@ -316,10 +415,22 @@ def preview_file(session_id: str, filename: str):
 
 
 @app.get("/api/upload/{session_id}/raw/{filename}")
-def get_raw_file(session_id: str, filename: str):
-    """Serve raw uploaded file for images, audio playback, and document previews."""
-    safe_name = Path(filename).name
-    dest_path = settings.upload_dir / session_id / safe_name
+def get_raw_file(
+    session_id: str,
+    filename: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    """Serve raw uploaded file for images, audio playback, and document previews with tenant isolation."""
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to view this file."}, status_code=403)
+
+    safe_name = sanitize_filename(filename)
+    tenant_folder = get_tenant_folder(session_id, user)
+    dest_path = settings.upload_dir / tenant_folder / session_id / safe_name
+    if not dest_path.exists():
+        dest_path = settings.upload_dir / session_id / safe_name
     if not dest_path.exists():
         dest_path = Path(__file__).resolve().parent.parent / safe_name
     if dest_path.exists():
@@ -439,16 +550,30 @@ async def rag_chat(payload: RagChatPayload):
 
 
 @app.get("/api/graph")
-def get_knowledge_graph(session_id: str = "demo"):
-    """Interactive Knowledge Graph / RAG Graph endpoint."""
+def get_knowledge_graph(
+    session_id: str = "demo",
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    """Interactive Knowledge Graph / RAG Graph endpoint with tenant isolation."""
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to view this knowledge graph."}, status_code=403)
     from app.graph_generator import generate_knowledge_graph
     state = SESSIONS.get(session_id) or db.load_session(session_id)
     return generate_knowledge_graph(state)
 
 
 @app.get("/api/brd/pdf")
-def download_brd_pdf_stream(session_id: str = "demo"):
-    """Download executive Business Requirements Document (BRD) as high-grade PDF."""
+def download_brd_pdf_stream(
+    session_id: str = "demo",
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    """Download executive Business Requirements Document (BRD) as high-grade PDF with tenant isolation."""
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to download this BRD."}, status_code=403)
     from app.brd_pdf import generate_brd_pdf
     state = SESSIONS.get(session_id) or db.load_session(session_id)
     if not state:
@@ -511,9 +636,18 @@ def new_session():
 
 
 @app.get("/api/projects")
-def list_projects(x_user_id: Optional[str] = Header(None)):
+def list_projects(authorization: Optional[str] = Header(None), x_user_id: Optional[str] = Header(None)):
+    user = get_auth_user(authorization, x_user_id)
     with db.connect() as conn:
-        rows = conn.execute("SELECT id, updated_at, context_json FROM sessions ORDER BY updated_at DESC").fetchall()
+        if user:
+            rows = conn.execute(
+                "SELECT id, updated_at, context_json FROM sessions WHERE user_id = ? ORDER BY updated_at DESC",
+                (user["id"],),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, updated_at, context_json FROM sessions WHERE user_id IS NULL OR id = 'demo' ORDER BY updated_at DESC"
+            ).fetchall()
     projects = []
     seen = set()
     for r in rows:
@@ -537,28 +671,6 @@ def list_projects(x_user_id: Optional[str] = Header(None)):
             "findings_count": findings_count,
             "version": version,
         })
-    for sid, state in SESSIONS.items():
-        if sid not in seen:
-            seen.add(sid)
-            projects.append({
-                "session_id": sid,
-                "updated_at": state.generated_at.isoformat() if hasattr(state, "generated_at") else get_now().isoformat(),
-                "description": getattr(state, "project_description", "Active Workspace") or "Active Workspace",
-                "files_count": len(state.chunks) if hasattr(state, "chunks") else 0,
-                "findings_count": len(state.findings) if hasattr(state, "findings") else 0,
-                "version": getattr(state, "version", 1),
-            })
-    for sid, chunks in UPLOADS.items():
-        if sid not in seen:
-            seen.add(sid)
-            projects.append({
-                "session_id": sid,
-                "updated_at": get_now().isoformat(),
-                "description": "Uploaded Documents",
-                "files_count": len(chunks),
-                "findings_count": 0,
-                "version": 1,
-            })
     return projects
 
 
@@ -589,25 +701,39 @@ def reset_session(session_id: str = "demo", x_user_id: Optional[str] = Header(No
 
 
 @app.get("/api/generate")
-async def generate(session_id: str = "demo", project_description: str = "", x_user_id: Optional[str] = Header(None)):
-    chunks = UPLOADS.get(session_id) or []
+async def generate(
+    session_id: str = "demo",
+    project_description: str = "",
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        async def denied_events():
+            yield {"event": "error", "data": json.dumps({"error": "Access denied: You do not own this workspace."})}
+        return EventSourceResponse(denied_events())
+
+    chunks = get_uploads_cache(session_id, user)
     if not chunks:
         # 1. Restore from persisted SQLite session
         saved_state = db.load_session(session_id)
         if saved_state and saved_state.get("chunks"):
             try:
                 chunks = [SourceChunk.model_validate(c) for c in saved_state["chunks"]]
-                UPLOADS[session_id] = chunks
+                set_uploads_cache(session_id, chunks, user)
             except Exception:
                 pass
 
     if not chunks:
         # 2. Restore from files in upload_dir if available
-        dest_dir = settings.upload_dir / session_id
+        tenant_folder = get_tenant_folder(session_id, user)
+        dest_dir = settings.upload_dir / tenant_folder / session_id
+        if not dest_dir.exists():
+            dest_dir = settings.upload_dir / session_id
         if dest_dir.exists():
             disk_chunks = []
             for p in sorted(dest_dir.iterdir()):
-                if p.is_file() and p.suffix.lower() in ALLOWED_EXTENSIONS:
+                if p.is_file():
                     try:
                         data = p.read_bytes()
                         disk_chunks.extend(ingest_bytes(p.name, data, p))
@@ -615,12 +741,12 @@ async def generate(session_id: str = "demo", project_description: str = "", x_us
                         pass
             if disk_chunks:
                 chunks = disk_chunks
-                UPLOADS[session_id] = chunks
+                set_uploads_cache(session_id, chunks, user)
 
     if not chunks and session_id == "demo":
         # 3. For demo session, fallback to prepackaged demo chunks
         chunks = load_demo_chunks()
-        UPLOADS[session_id] = chunks
+        set_uploads_cache(session_id, chunks, user)
 
     if not chunks and project_description.strip():
         chunks = [
@@ -632,7 +758,7 @@ async def generate(session_id: str = "demo", project_description: str = "", x_us
                 text=project_description.strip(),
             )
         ]
-        UPLOADS[session_id] = chunks
+        set_uploads_cache(session_id, chunks, user)
 
     if not chunks:
         async def empty_events():
@@ -675,10 +801,11 @@ async def generate(session_id: str = "demo", project_description: str = "", x_us
         return EventSourceResponse(empty_events())
 
     seq = 0
+    effective_user_id = user["id"] if user else (x_user_id or None)
 
     async def events():
         nonlocal seq
-        async for payload in run_pipeline(chunks, project_description, session_id, x_user_id):
+        async for payload in run_pipeline(chunks, project_description, session_id, effective_user_id):
             seq += 1
             if payload.get("type") == "complete":
                 state = payload.get("state", {})
@@ -691,7 +818,7 @@ async def generate(session_id: str = "demo", project_description: str = "", x_us
                         "conflicts_count": len(state.get("conflicts", [])),
                     },
                     source_chunk_text=f"{session_id}:{len(chunks)}",
-                    signer_id=x_user_id or "system",
+                    signer_id=effective_user_id or "system",
                 )
             yield {"id": str(seq), "event": payload.get("type", "message"), "data": json.dumps(payload, default=str)}
 
@@ -700,20 +827,37 @@ async def generate(session_id: str = "demo", project_description: str = "", x_us
 
 
 @app.get("/api/session/{session_id}")
-def get_session(session_id: str, x_user_id: Optional[str] = Header(None)):
+def get_session(
+    session_id: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to access this workspace."}, status_code=403)
+
     state = SESSIONS.get(session_id) or db.load_session(session_id)
     if not state:
         return JSONResponse({"error": "not found"}, status_code=404)
+    caller_id = user["id"] if user else x_user_id
     state = {
         **state,
-        "tasks": [t.model_dump(mode="json") for t in db.list_tasks(x_user_id)],
-        "alerts": [a.model_dump(mode="json") for a in db.list_alerts(x_user_id)],
+        "tasks": [t.model_dump(mode="json") for t in db.list_tasks(caller_id)],
+        "alerts": [a.model_dump(mode="json") for a in db.list_alerts(caller_id)],
     }
     return state
 
 
 @app.post("/api/conflicts/resolve")
-def resolve(req: ResolveConflictRequest, session_id: str = "demo"):
+def resolve(
+    req: ResolveConflictRequest,
+    session_id: str = "demo",
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to modify this workspace."}, status_code=403)
     state = SESSIONS.get(session_id) or db.load_session(session_id)
     if not state:
         return JSONResponse({"error": "no session"}, status_code=404)
@@ -837,8 +981,16 @@ def alerts(x_user_id: Optional[str] = Header(None)):
 
 
 @app.get("/api/export/{session_id}")
-def export_md(session_id: str):
-    state = SESSIONS.get(session_id)
+def export_md(
+    session_id: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to export this workspace."}, status_code=403)
+
+    state = SESSIONS.get(session_id) or db.load_session(session_id)
     if not state:
         return JSONResponse({"error": "no session"}, status_code=404)
     lines = [f"# Orbius BRD — {session_id}", f"_Version {state.get('version', 1)}_", ""]
@@ -852,7 +1004,15 @@ def export_md(session_id: str):
 
 
 @app.get("/api/export/{session_id}/pdf")
-def export_pdf(session_id: str):
+def export_pdf(
+    session_id: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to export this workspace."}, status_code=403)
+
     state = SESSIONS.get(session_id) or db.load_session(session_id)
     if not state:
         return JSONResponse({"error": "no session"}, status_code=404)
@@ -862,7 +1022,15 @@ def export_pdf(session_id: str):
 
 
 @app.get("/api/export/{session_id}/docx")
-def export_word(session_id: str):
+def export_word(
+    session_id: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to export this workspace."}, status_code=403)
+
     state = SESSIONS.get(session_id) or db.load_session(session_id)
     if not state:
         return JSONResponse({"error": "no session"}, status_code=404)
@@ -876,24 +1044,48 @@ def export_word(session_id: str):
 
 
 @app.post("/api/chat")
-def copilot_chat(req: ChatRequest):
+def copilot_chat(
+    req: ChatRequest,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(req.session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to query this workspace."}, status_code=403)
+
     state = SESSIONS.get(req.session_id) or db.load_session(req.session_id)
     findings = [Finding.model_validate(f) for f in (state.get("findings") if state else [])]
-    chunks = [SourceChunk.model_validate(c) for c in (state.get("chunks") if state else (UPLOADS.get(req.session_id) or []))]
+    chunks = [SourceChunk.model_validate(c) for c in (state.get("chunks") if state else get_uploads_cache(req.session_id, user))]
     project_desc = state.get("project_description", "") if state else ""
     return run_copilot_chat(req.message, req.history, findings, chunks, project_desc)
 
 
 @app.post("/api/scenario/simulate")
-def scenario_simulate(req: ScenarioRequest):
+def scenario_simulate(
+    req: ScenarioRequest,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(req.session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to simulate on this workspace."}, status_code=403)
+
     state = SESSIONS.get(req.session_id) or db.load_session(req.session_id)
     findings = [Finding.model_validate(f) for f in (state.get("findings") if state else [])]
-    chunks = [SourceChunk.model_validate(c) for c in (state.get("chunks") if state else (UPLOADS.get(req.session_id) or []))]
+    chunks = [SourceChunk.model_validate(c) for c in (state.get("chunks") if state else get_uploads_cache(req.session_id, user))]
     return simulate_what_if_scenario(req.scenario_type, req.parameter_value, req.custom_prompt, findings, chunks)
 
 
 @app.get("/api/export/{session_id}/jira")
-def export_jira(session_id: str):
+def export_jira(
+    session_id: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to export this workspace."}, status_code=403)
+
     state = SESSIONS.get(session_id) or db.load_session(session_id)
     if not state:
         return JSONResponse({"error": "no session"}, status_code=404)
@@ -906,7 +1098,15 @@ def export_jira(session_id: str):
 
 
 @app.get("/api/export/{session_id}/linear")
-def export_linear(session_id: str):
+def export_linear(
+    session_id: str,
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+):
+    user = get_auth_user(authorization, x_user_id)
+    if not check_session_access(session_id, user):
+        return JSONResponse({"error": "Access denied: You do not have permission to export this workspace."}, status_code=403)
+
     state = SESSIONS.get(session_id) or db.load_session(session_id)
     if not state:
         return JSONResponse({"error": "no session"}, status_code=404)

@@ -3,7 +3,34 @@ import mermaid from "mermaid";
 import LiquidAuroraBackground from "./components/LiquidAuroraBackground";
 import MultimodalCore from "./components/MultimodalCore";
 
-const SESSION = "demo";
+export function getActiveSessionId(currentUser) {
+  try {
+    if (currentUser && (currentUser.id || currentUser.email)) {
+      const cleanId = String(currentUser.id || currentUser.email).replace(/[^a-zA-Z0-9_-]/g, "_");
+      return cleanId.startsWith("usr_") ? `${cleanId}_workspace` : `usr_${cleanId}_workspace`;
+    }
+    const userStr = typeof localStorage !== "undefined" ? localStorage.getItem("orbius_user") : null;
+    if (userStr) {
+      const u = JSON.parse(userStr);
+      if (u && (u.id || u.email)) {
+        const cleanId = String(u.id || u.email).replace(/[^a-zA-Z0-9_-]/g, "_");
+        return cleanId.startsWith("usr_") ? `${cleanId}_workspace` : `usr_${cleanId}_workspace`;
+      }
+    }
+    let anon = typeof localStorage !== "undefined" ? localStorage.getItem("orbius_anon_session") : null;
+    if (!anon) {
+      anon = `anon_${Math.random().toString(36).substring(2, 10)}_${Date.now().toString(36)}`;
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("orbius_anon_session", anon);
+      }
+    }
+    return anon;
+  } catch (e) {
+    return "demo";
+  }
+}
+
+const SESSION = getActiveSessionId();
 
 mermaid.initialize({
   startOnLoad: false,
@@ -797,7 +824,7 @@ function RobotRagButton({ onClick }) {
 // ==========================================
 // FEATURE 3: Conversational RAG Copilot (replacing AI Assistant)
 // ==========================================
-function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
+function CopilotDrawer({ isOpen, onClose, onOpenEvidence, sessionId }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
@@ -910,7 +937,7 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: SESSION,
+          session_id: sessionId || getActiveSessionId(),
           message: text,
           history: nextHistory.map((m) => ({ role: m.role, content: cleanRagText(m.content) })),
         }),
@@ -1093,18 +1120,19 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
 // ==========================================
 // FEATURE: Interactive Knowledge & RAG Graph
 // ==========================================
-function KnowledgeGraphTab({ session }) {
+function KnowledgeGraphTab({ session, sessionId }) {
   const [graphData, setGraphData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedNode, setSelectedNode] = useState(null);
   const [filterType, setFilterType] = useState("all");
+  const activeSess = sessionId || session?.session_id || getActiveSessionId();
 
   useEffect(() => {
-    jsonFetch(`/api/graph?session_id=${SESSION}`)
+    jsonFetch(`/api/graph?session_id=${encodeURIComponent(activeSess)}`)
       .then((data) => setGraphData(data))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [session]);
+  }, [activeSess, session]);
 
   const nodes = graphData?.nodes || [];
   const edges = graphData?.edges || [];
@@ -1273,7 +1301,7 @@ function KnowledgeGraphTab({ session }) {
 // ==========================================
 // FEATURE 4: Live "What-If" Scenario Simulator Modal
 // ==========================================
-function ScenarioSimulatorModal({ isOpen, onClose }) {
+function ScenarioSimulatorModal({ isOpen, onClose, sessionId }) {
   const [activeScenario, setActiveScenario] = useState("budget_cut");
   const [submittedScenario, setSubmittedScenario] = useState(null);
   const [customPrompt, setCustomPrompt] = useState("");
@@ -1298,7 +1326,7 @@ function ScenarioSimulatorModal({ isOpen, onClose }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: SESSION,
+          session_id: sessionId || getActiveSessionId(),
           scenario_type: scType,
           custom_prompt: scType === "custom" ? customPrompt : "",
         }),
@@ -2638,6 +2666,7 @@ export default function App() {
       return null;
     }
   });
+  const activeSessionId = useMemo(() => getActiveSessionId(user), [user]);
 
   // Navigation & Modals
   const [view, setView] = useState("landing"); // "landing" | "studio"
@@ -2807,11 +2836,11 @@ export default function App() {
     fetchUserSession();
 
     return () => clearInterval(routerInterval);
-  }, [user]);
+  }, [user, activeSessionId]);
 
   async function fetchUserSession() {
     try {
-      const sess = await jsonFetch(`/api/session/${SESSION}`);
+      const sess = await jsonFetch(`/api/session/${encodeURIComponent(activeSessionId)}`);
       if (sess && sess.sections && sess.sections.length > 0) {
         setState(sess);
         setSections(sess.sections);
@@ -2821,13 +2850,21 @@ export default function App() {
           );
           setFiles(unique);
         }
+      } else {
+        setState(null);
+        setSections([]);
+        setFiles([]);
       }
       jsonFetch("/api/calendar")
         .then((evs) => {
           if (Array.isArray(evs) && evs.length > 0) setCalendarEvents(evs);
         })
         .catch(() => {});
-    } catch (e) {}
+    } catch (e) {
+      setState(null);
+      setSections([]);
+      setFiles([]);
+    }
   }
 
   async function handleAuthSubmit(e) {
@@ -2841,6 +2878,11 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      // Clear workspace state so previous user's files are not visible
+      setFiles([]);
+      setState(null);
+      setSections([]);
+      setDescription("");
       localStorage.setItem("orbius_user", JSON.stringify(res.user));
       localStorage.setItem("orbius_token", res.token);
       setUser(res.user);
@@ -2853,15 +2895,21 @@ export default function App() {
 
   function handleLogout() {
     setUser(null);
+    setFiles([]);
+    setState(null);
+    setSections([]);
+    setDescription("");
     localStorage.removeItem("orbius_user");
     localStorage.removeItem("orbius_token");
+    const freshAnon = `anon_${Math.random().toString(36).substring(2, 10)}_${Date.now().toString(36)}`;
+    localStorage.setItem("orbius_anon_session", freshAnon);
     showToast("Logged out.");
   }
 
   async function loadDemoData() {
     setUploading(true);
     try {
-      const data = await jsonFetch(`/api/demo/load?session_id=${SESSION}`, { method: "POST" });
+      const data = await jsonFetch(`/api/demo/load?session_id=${encodeURIComponent(activeSessionId)}`, { method: "POST" });
       setFiles(data.files || []);
       setState(null);
       setSections([]);
@@ -2878,7 +2926,7 @@ export default function App() {
     setUploading(true);
     try {
       const body = new FormData();
-      body.append("session_id", SESSION);
+      body.append("session_id", activeSessionId);
       [...list].forEach((f) => body.append("files", f));
       const data = await jsonFetch("/api/upload", { method: "POST", body });
       setFiles(data.files || []);
@@ -2894,7 +2942,7 @@ export default function App() {
 
   async function removeFile(fileName) {
     try {
-      const data = await jsonFetch(`/api/upload/${SESSION}/${encodeURIComponent(fileName)}`, { method: "DELETE" });
+      const data = await jsonFetch(`/api/upload/${encodeURIComponent(activeSessionId)}/${encodeURIComponent(fileName)}`, { method: "DELETE" });
       setFiles(data.files || []);
       showToast(`Removed "${fileName}"`);
     } catch (err) {
@@ -2904,7 +2952,7 @@ export default function App() {
 
   async function clearAllFiles() {
     try {
-      await jsonFetch(`/api/upload/${SESSION}`, { method: "DELETE" });
+      await jsonFetch(`/api/upload/${encodeURIComponent(activeSessionId)}`, { method: "DELETE" });
       setFiles([]);
       showToast("Cleared uploaded files.");
     } catch (err) {
@@ -2914,7 +2962,7 @@ export default function App() {
 
   async function openFilePreview(fileName) {
     try {
-      const data = await jsonFetch(`/api/upload/${SESSION}/preview/${encodeURIComponent(fileName)}`);
+      const data = await jsonFetch(`/api/upload/${encodeURIComponent(activeSessionId)}/preview/${encodeURIComponent(fileName)}`);
       setFilePreviewModal(data);
     } catch (err) {
       showToast(`Preview: ${err.message || "File preview unavailable"}`);
@@ -2931,7 +2979,7 @@ export default function App() {
     setEvents([]);
     setView("studio");
 
-    const url = `/api/generate?session_id=${SESSION}&project_description=${encodeURIComponent(description)}`;
+    const url = `/api/generate?session_id=${encodeURIComponent(activeSessionId)}&project_description=${encodeURIComponent(description)}`;
     const es = new EventSource(url);
 
     es.addEventListener("section", (e) => {
@@ -2987,7 +3035,7 @@ export default function App() {
     try {
       if (evidence) setEvidence(null);
       const normalizedKeep = (keep === "a" || keep === "left") ? "left" : "right";
-      const next = await jsonFetch(`/api/conflicts/resolve?session_id=${SESSION}`, {
+      const next = await jsonFetch(`/api/conflicts/resolve?session_id=${encodeURIComponent(activeSessionId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conflict_id: id, keep: normalizedKeep, note: "Resolved in human review." }),
@@ -3010,7 +3058,7 @@ export default function App() {
     try {
       await jsonFetch(`/api/tasks/${taskId}/${action}`, { method: "POST" });
     } catch (err) {}
-    const next = await jsonFetch(`/api/session/${SESSION}`);
+    const next = await jsonFetch(`/api/session/${encodeURIComponent(activeSessionId)}`);
     setState(next);
     jsonFetch("/api/calendar")
       .then((evs) => {
@@ -3868,7 +3916,7 @@ export default function App() {
                   Export Specs (.md)
                 </button>
                 <a
-                  href={`/api/brd/pdf?session_id=${encodeURIComponent(SESSION)}`}
+                  href={`/api/brd/pdf?session_id=${encodeURIComponent(activeSessionId)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-3 py-1.5 rounded-[4px] bg-secondary text-on-secondary hover:bg-secondary/90 border border-white/[0.06] text-xs font-label-mono font-medium flex items-center gap-1.5"
@@ -4185,7 +4233,7 @@ export default function App() {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <a
-                        href={`/api/brd/export-pdf?session_id=${SESSION}`}
+                        href={`/api/brd/export-pdf?session_id=${encodeURIComponent(activeSessionId)}`}
                         download="Orbius_BRD_Specification.pdf"
                         target="_blank"
                         rel="noreferrer"
@@ -4214,11 +4262,11 @@ export default function App() {
             )}
 
             {studioTab === "tests" && (
-              <GherkinTestCases sessionId={SESSION} />
+              <GherkinTestCases sessionId={activeSessionId} />
             )}
 
             {studioTab === "ripple" && (
-              <ImpactRippleGraph sessionId={SESSION} />
+              <ImpactRippleGraph sessionId={activeSessionId} />
             )}
 
             {studioTab === "trace" && (
@@ -4226,7 +4274,7 @@ export default function App() {
             )}
 
             {studioTab === "meeting" && (
-              <LiveMeetingMode sessionId={SESSION} />
+              <LiveMeetingMode sessionId={activeSessionId} />
             )}
 
             {studioTab === "actions" && (
@@ -4349,7 +4397,7 @@ export default function App() {
             {/* KNOWLEDGE GRAPH TAB */}
             {studioTab === "graph" && (
               <div className="space-y-6">
-                <KnowledgeGraphTab session={state} />
+                <KnowledgeGraphTab session={state} sessionId={activeSessionId} />
               </div>
             )}
           </div>
@@ -4406,11 +4454,13 @@ export default function App() {
         isOpen={showCopilot}
         onClose={() => setShowCopilot(false)}
         onOpenEvidence={openEvidence}
+        sessionId={activeSessionId}
       />
 
       <ScenarioSimulatorModal
         isOpen={showScenarioModal}
         onClose={() => setShowScenarioModal(false)}
+        sessionId={activeSessionId}
       />
 
       <AccuracyScorecard
@@ -4584,7 +4634,7 @@ export default function App() {
             {((filePreviewModal.filename || filePreviewModal.name || "").match(/\.(png|jpe?g|webp|gif|bmp|svg)$/i) || filePreviewModal.modality === "image" || filePreviewModal.modality === "vision") && (
               <div className="p-3 bg-surface-container-lowest rounded-lg border border-white/[0.06] flex flex-col items-center justify-center shrink-0">
                 <img
-                  src={`/api/upload/${encodeURIComponent(SESSION)}/raw/${encodeURIComponent(filePreviewModal.filename || filePreviewModal.file_name || filePreviewModal.name)}`}
+                  src={`/api/upload/${encodeURIComponent(activeSessionId)}/raw/${encodeURIComponent(filePreviewModal.filename || filePreviewModal.file_name || filePreviewModal.name)}`}
                   alt={filePreviewModal.filename || "Visual preview"}
                   className="max-h-56 rounded object-contain border border-white/10 shadow-lg"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
@@ -4598,7 +4648,7 @@ export default function App() {
               <div className="p-3 bg-surface-container-lowest rounded-lg border border-white/[0.06] shrink-0">
                 <audio
                   controls
-                  src={`/api/upload/${encodeURIComponent(SESSION)}/raw/${encodeURIComponent(filePreviewModal.filename || filePreviewModal.file_name || filePreviewModal.name)}`}
+                  src={`/api/upload/${encodeURIComponent(activeSessionId)}/raw/${encodeURIComponent(filePreviewModal.filename || filePreviewModal.file_name || filePreviewModal.name)}`}
                   className="w-full"
                 />
                 <div className="text-[10px] text-outline font-label-mono mt-1 text-center">Voice memo / meeting transcription recording</div>

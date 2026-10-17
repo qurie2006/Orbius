@@ -64,12 +64,33 @@ def _extract_docx(path: Path) -> str:
         return ""
 
 
+ZIP_EXT = {".zip"}
+
+
 def ingest_file(path: Path, original_name: Optional[str] = None) -> List[SourceChunk]:
     name = Path(original_name or path.name).name
     ext = Path(name).suffix.lower()
     source_id = f"{Path(name).stem}_{uuid.uuid4().hex[:6]}"
 
     try:
+        if ext == ".zip":
+            import zipfile
+            import tempfile
+            chunks: List[SourceChunk] = []
+            try:
+                with zipfile.ZipFile(str(path)) as zf:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        zf.extractall(tmpdir)
+                        for sub_path in Path(tmpdir).rglob("*"):
+                            if sub_path.is_file() and not sub_path.name.startswith((".", "__MACOSX")):
+                                rel_name = f"{name}/{sub_path.relative_to(tmpdir)}"
+                                sub_chunks = ingest_file(sub_path, original_name=rel_name)
+                                chunks.extend(sub_chunks)
+                if chunks:
+                    return chunks
+            except Exception as e:
+                return _chunks_from_text(source_id, name, f"[{name} - Error unpacking zip: {str(e)}]", "text")
+
         if ext in IMAGE_EXT:
             from app.config import settings
             import os
@@ -80,11 +101,15 @@ def ingest_file(path: Path, original_name: Optional[str] = None) -> List[SourceC
                 try:
                     from google import genai
                     from google.genai import types
-                    mime = "image/png" if ext == ".png" else "image/jpeg"
-                    if ext == ".webp":
-                        mime = "image/webp"
-                    elif ext == ".gif":
-                        mime = "image/gif"
+                    mime_map = {
+                        ".png": "image/png",
+                        ".jpg": "image/jpeg",
+                        ".jpeg": "image/jpeg",
+                        ".webp": "image/webp",
+                        ".gif": "image/gif",
+                        ".svg": "image/svg+xml"
+                    }
+                    mime = mime_map.get(ext, "image/jpeg")
                     client = genai.Client(api_key=api_key)
                     image_bytes = path.read_bytes()
                     res = client.models.generate_content(
@@ -92,10 +117,13 @@ def ingest_file(path: Path, original_name: Optional[str] = None) -> List[SourceC
                         contents=[
                             types.Part.from_bytes(data=image_bytes, mime_type=mime),
                             (
-                                "Analyze this UI wireframe, architecture diagram, or screen capture in detail. "
-                                "Identify all user interface components, buttons, navigation flows, data entities, "
-                                "text labels, layout hierarchy, and functional requirements indicated. "
-                                "Provide a thorough textual specification of everything shown."
+                                "Analyze this image with maximum accuracy and completeness. Whether it is a real-world photo, "
+                                "whiteboard, architectural schematic, document scan, invoice, workflow chart, flowchart, "
+                                "sketch, or interface layout:\n"
+                                "1. Transcribe ALL visible text, labels, headings, captions, numbers, and notes verbatim.\n"
+                                "2. Describe all entities, visual relationships, processes, arrows, steps, and system components.\n"
+                                "3. Extract any specifications, technical requirements, business rules, or key metrics shown.\n"
+                                "4. Provide an exhaustive, well-structured technical breakdown of all content present in the image."
                             ),
                         ],
                     )
@@ -103,7 +131,7 @@ def ingest_file(path: Path, original_name: Optional[str] = None) -> List[SourceC
                 except Exception as e:
                     description = f"[Vision analysis for {name}: {str(e)}]"
             if not description:
-                description = f"[Image uploaded: {name}. Visual layout and UI component wireframe.]"
+                description = f"[Image uploaded: {name}. Visual asset processed for multimodal RAG analysis.]"
 
             return [
                 SourceChunk(

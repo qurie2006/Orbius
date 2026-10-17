@@ -742,30 +742,162 @@ function VoiceRecorder({ onAudioRecorded }) {
 // ==========================================
 // FEATURE 3: Chat with BRD Copilot Drawer
 // ==========================================
+// Clean helper to strictly remove '**' and '\' from RAG chatbot output
+function cleanRagText(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/\*\*/g, "")
+    .replace(/\\/g, "")
+    .replace(/\r\n/g, "\n");
+}
+
+// 3D Robot Floating Button on Bottom-Left for Studio
+function RobotRagButton({ onClick }) {
+  return (
+    <div className="fixed bottom-6 left-6 z-40 group animate-in fade-in duration-300">
+      <button
+        type="button"
+        onClick={onClick}
+        className="relative flex items-center gap-3 px-3.5 py-2.5 rounded-2xl bg-surface-container-lowest/95 backdrop-blur-xl border border-white/[0.14] hover:border-secondary/60 shadow-[0_12px_32px_rgba(0,0,0,0.65),0_0_24px_rgba(123,208,255,0.18)] hover:shadow-[0_16px_44px_rgba(0,0,0,0.8),0_0_32px_rgba(123,208,255,0.35)] transition-all duration-300 transform hover:-translate-y-1 active:translate-y-0 text-left select-none cursor-pointer"
+        title="Open Conversational RAG Copilot"
+      >
+        {/* 3D Robot Head Graphic matching background */}
+        <div className="relative w-11 h-11 rounded-xl bg-gradient-to-br from-surface-container-highest via-surface-container to-surface-container-lowest border border-white/[0.18] flex items-center justify-center shadow-inner overflow-hidden shrink-0 group-hover:scale-105 transition-transform">
+          <div className="absolute inset-0 bg-secondary/10 rounded-xl" />
+          <svg className="w-7 h-7 relative z-10 text-secondary drop-shadow-[0_2px_8px_rgba(123,208,255,0.5)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            {/* Antenna with glowing beacon */}
+            <line x1="12" y1="2" x2="12" y2="5" />
+            <circle cx="12" cy="2" r="1.2" fill="#7bd0ff" />
+            {/* 3D Beveled Robot Head */}
+            <rect x="4" y="5" width="16" height="13" rx="3" className="fill-surface-container-high stroke-secondary" />
+            {/* Glowing Visor */}
+            <rect x="7" y="9" width="10" height="3" rx="1.5" fill="#7bd0ff" className="animate-pulse" />
+            {/* Ear Bolts */}
+            <line x1="2" y1="10" x2="4" y2="10" />
+            <line x1="20" y1="10" x2="22" y2="10" />
+            {/* Grid Sensors */}
+            <line x1="8" y1="15" x2="16" y2="15" stroke="#94a3b8" strokeDasharray="1.5 1.5" />
+          </svg>
+          <span className="absolute bottom-1 right-1 w-2 h-2 rounded-full bg-emerald-400 border border-black shadow-[0_0_6px_#34d399]" />
+        </div>
+
+        {/* Text Label & Badge */}
+        <div className="flex flex-col pr-1">
+          <div className="flex items-center gap-1.5">
+            <span className="font-headline-md text-xs font-semibold text-primary tracking-tight">RAG Copilot</span>
+            <span className="px-1.5 py-0.2 rounded text-[9px] font-label-mono bg-secondary/15 text-secondary border border-secondary/25 uppercase">3D Bot</span>
+          </div>
+          <span className="text-[10px] text-outline font-label-mono truncate">Vector Search & Voice</span>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+// ==========================================
+// FEATURE 3: Conversational RAG Copilot (replacing AI Assistant)
+// ==========================================
 function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      content: "Hello! I am your **Orbius Project Assistant**. Ask me anything about your project requirements, scope trade-offs, budget constraints, or ask me to draft stakeholder updates.",
+      content: "Greetings. I am your Conversational RAG Copilot, powered by ChromaDB vector similarity search. Ask me any question about your specifications, cross-document constraints, timelines, or system architecture.",
+      sources: [],
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState([
-    "What are the main requirements?",
-    "Summarize all budget constraints",
-    "What deadlines or action items are there?",
-    "Draft a reply email to the sender",
-  ]);
+  const [isListening, setIsListening] = useState(false);
+  const [speakingIndex, setSpeakingIndex] = useState(null);
+  const recognitionRef = useRef(null);
   const chatEndRef = useRef(null);
+
+  const suggestions = [
+    "What are the core technical requirements?",
+    "Summarize all budget and cost limits",
+    "Are there any cross-document conflicts?",
+    "What are the upcoming deadline milestones?",
+  ];
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  // Clean-up speech synthesis on unmount or close
+  useEffect(() => {
+    if (!isOpen && typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      setSpeakingIndex(null);
+    }
+  }, [isOpen]);
+
+  // Voice Output (Text-to-Speech)
+  function handleSpeak(text, index) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      alert("Text-to-speech is not supported by this browser.");
+      return;
+    }
+    if (speakingIndex === index) {
+      window.speechSynthesis.cancel();
+      setSpeakingIndex(null);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const cleaned = cleanRagText(text);
+    const utter = new SpeechSynthesisUtterance(cleaned);
+    utter.rate = 1.0;
+    utter.pitch = 1.0;
+    utter.onend = () => setSpeakingIndex(null);
+    utter.onerror = () => setSpeakingIndex(null);
+    window.speechSynthesis.speak(utter);
+    setSpeakingIndex(index);
+  }
+
+  // Voice Input (Speech-to-Text)
+  function toggleListening() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Please use Chrome or Edge.");
+      return;
+    }
+    if (isListening) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (_) {}
+      }
+      setIsListening(false);
+      return;
+    }
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || "en-US";
+      recognition.onstart = () => setIsListening(true);
+      recognition.onresult = (event) => {
+        let transcript = "";
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        setInput(transcript);
+      };
+      recognition.onerror = () => setIsListening(false);
+      recognition.onend = () => setIsListening(false);
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch (err) {
+      alert("Microphone error: " + err.message);
+      setIsListening(false);
+    }
+  }
+
   async function handleSend(textToSend) {
     const text = textToSend || input;
     if (!text.trim() || loading) return;
+
+    if (isListening && recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (_) {}
+      setIsListening(false);
+    }
 
     const userMsg = { role: "user", content: text };
     const nextHistory = [...messages, userMsg];
@@ -774,31 +906,32 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
     setLoading(true);
 
     try {
-      const res = await jsonFetch("/api/chat", {
+      const res = await jsonFetch("/api/rag/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: SESSION,
           message: text,
-          history: nextHistory.map((m) => ({ role: m.role, content: m.content })),
+          history: nextHistory.map((m) => ({ role: m.role, content: cleanRagText(m.content) })),
         }),
       });
 
+      const cleanReply = cleanRagText(res.reply || "No response received from RAG engine.");
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: res.reply,
-          citations: res.citations || [],
+          content: cleanReply,
+          sources: res.sources || [],
         },
       ]);
-      if (res.suggested_followups) setSuggestions(res.suggested_followups);
     } catch (err) {
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `Error fetching answer: ${err.message}`,
+          content: `RAG retrieval notice: ${err.message}`,
+          sources: [],
         },
       ]);
     } finally {
@@ -809,11 +942,22 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[440px] bg-surface-container-low border-l border-white/[0.08] shadow-2xl flex flex-col backdrop-blur-xl">
+    <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] bg-surface-container-low border-l border-white/[0.08] shadow-2xl flex flex-col backdrop-blur-2xl animate-in slide-in-from-right duration-300">
+      {/* Header */}
       <div className="p-4 border-b border-white/[0.06] flex items-center justify-between bg-surface-container-lowest/80">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-tertiary-fixed" />
-          <h3 className="font-headline-md text-sm text-primary tracking-tight font-medium">Orbius AI Assistant</h3>
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-surface-container-high border border-white/[0.12] flex items-center justify-center text-secondary">
+            <span className="material-symbols-outlined text-[18px]">smart_toy</span>
+          </div>
+          <div>
+            <h3 className="font-headline-md text-sm text-primary font-semibold flex items-center gap-2">
+              <span>Conversational RAG Copilot</span>
+              <span className="px-1.5 py-0.2 rounded text-[9px] font-label-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                Vector DB
+              </span>
+            </h3>
+            <span className="text-[10px] text-outline font-label-mono block">Zero Hallucination • Voice Enabled</span>
+          </div>
         </div>
         <button
           type="button"
@@ -824,76 +968,302 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence }) {
         </button>
       </div>
 
+      {/* Message Stream */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`p-3 rounded-lg text-sm ${
+            className={`p-3.5 rounded-xl text-xs transition-all ${
               m.role === "user"
-                ? "bg-secondary-container/20 border border-secondary/30 text-on-surface ml-8"
-                : "bg-surface-container border border-white/[0.06] text-on-surface-variant mr-4"
+                ? "bg-secondary/15 border border-secondary/30 text-primary ml-6"
+                : "bg-surface-container border border-white/[0.06] text-on-surface-variant mr-3"
             }`}
           >
-            <div className="font-label-mono-sm text-[10px] uppercase text-outline mb-1">
-              {m.role === "user" ? "You" : "Orbius AI"}
+            <div className="flex items-center justify-between font-label-mono text-[10px] uppercase text-outline mb-1.5">
+              <span className="font-semibold text-secondary">
+                {m.role === "user" ? "You" : "Orbius RAG Copilot"}
+              </span>
+              {m.role === "assistant" && (
+                <button
+                  type="button"
+                  onClick={() => handleSpeak(m.content, i)}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                    speakingIndex === i
+                      ? "bg-secondary text-on-secondary font-bold"
+                      : "bg-surface-container-high hover:bg-surface-container-highest text-secondary"
+                  }`}
+                  title={speakingIndex === i ? "Stop speaking" : "Listen to answer (Voice Output)"}
+                >
+                  <span className="material-symbols-outlined text-[13px]">
+                    {speakingIndex === i ? "volume_off" : "volume_up"}
+                  </span>
+                  <span>{speakingIndex === i ? "Stop Voice" : "Voice Out"}</span>
+                </button>
+              )}
             </div>
-            <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
-            {m.citations && m.citations.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-white/[0.06] flex flex-wrap gap-1.5">
-                <span className="font-label-mono-sm text-[10px] text-outline">Sources:</span>
-                {m.citations.map((c, ci) => (
-                  <button
-                    key={ci}
-                    type="button"
-                    onClick={() => onOpenEvidence(c)}
-                    className="font-label-mono-sm text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-secondary border border-secondary/20"
+
+            <div className="whitespace-pre-wrap leading-relaxed text-primary">
+              {cleanRagText(m.content)}
+            </div>
+
+            {/* Sources & Citations */}
+            {m.sources && m.sources.length > 0 && (
+              <div className="mt-2.5 pt-2 border-t border-white/[0.06] flex flex-wrap gap-1.5">
+                <span className="font-label-mono text-[10px] text-outline shrink-0 flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[12px] text-secondary">database</span>
+                  <span>Sources:</span>
+                </span>
+                {m.sources.map((s, si) => (
+                  <span
+                    key={si}
+                    className="font-label-mono text-[10px] px-2 py-0.5 rounded bg-surface-container-high text-secondary border border-secondary/20"
+                    title={s.snippet || "Retrieved context chunk"}
                   >
-                    {c.file_name} #{c.source_id}
-                  </button>
+                    {s.file_name}
+                  </span>
                 ))}
               </div>
             )}
           </div>
         ))}
         {loading && (
-          <div className="flex items-center gap-2 text-xs text-outline font-label-mono p-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-ping" />
-            Analyzing project requirements and notes...
+          <div className="flex items-center gap-2 text-xs text-secondary font-label-mono p-3 rounded bg-surface-container/60 border border-white/[0.06]">
+            <span className="w-2 h-2 rounded-full bg-secondary animate-ping" />
+            <span>Retrieving vector embeddings & synthesizing answer...</span>
           </div>
         )}
         <div ref={chatEndRef} />
       </div>
 
-      <div className="p-3 border-t border-white/[0.06] bg-surface-container-lowest/80 space-y-2">
+      {/* Input & Voice Controls */}
+      <div className="p-3.5 border-t border-white/[0.06] bg-surface-container-lowest/90 space-y-2.5">
         <div className="flex gap-1.5 overflow-x-auto pb-1 text-xs">
           {suggestions.map((s, idx) => (
             <button
               key={idx}
               type="button"
               onClick={() => handleSend(s)}
-              className="shrink-0 px-2.5 py-1 rounded-full bg-surface-container hover:bg-surface-container-high border border-white/[0.06] text-on-surface-variant text-[11px]"
+              className="shrink-0 px-2.5 py-1 rounded-full bg-surface-container hover:bg-surface-container-high border border-white/[0.06] text-on-surface-variant hover:text-primary text-[11px] transition-colors"
             >
               {s}
             </button>
           ))}
         </div>
-        <div className="flex gap-2">
+
+        <div className="flex items-center gap-2">
+          {/* Voice Input (Speech-to-Text) Toggle */}
+          <button
+            type="button"
+            onClick={toggleListening}
+            className={`w-9 h-9 rounded-[6px] flex items-center justify-center border transition-all shrink-0 ${
+              isListening
+                ? "bg-red-500 text-white border-red-400 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+                : "bg-surface-container text-secondary border-white/[0.08] hover:border-secondary/40"
+            }`}
+            title={isListening ? "Listening... click to stop" : "Voice Input: Click to speak your question"}
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              {isListening ? "mic_off" : "mic"}
+            </span>
+          </button>
+
           <input
             type="text"
-            placeholder="Ask about requirements, costs, risks..."
+            placeholder={isListening ? "Listening... speak now..." : "Ask any question over project files and architecture..."}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            className="flex-1 h-9 px-3 bg-surface-container border border-white/[0.08] rounded-[4px] text-primary text-xs focus:outline-none focus:border-secondary"
+            className="flex-1 h-9 px-3 bg-surface-container border border-white/[0.08] rounded-[6px] text-primary text-xs focus:outline-none focus:border-secondary"
           />
+
           <button
             type="button"
             disabled={loading || !input.trim()}
             onClick={() => handleSend()}
-            className="px-3 h-9 rounded-[4px] bg-primary text-on-primary font-medium text-xs hover:bg-primary-container disabled:opacity-40"
+            className="px-3.5 h-9 rounded-[6px] bg-primary text-on-primary font-medium text-xs hover:bg-primary-container disabled:opacity-40 transition-colors shrink-0"
           >
             Send
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// FEATURE: Interactive Knowledge & RAG Graph
+// ==========================================
+function KnowledgeGraphTab({ session }) {
+  const [graphData, setGraphData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [filterType, setFilterType] = useState("all");
+
+  useEffect(() => {
+    jsonFetch(`/api/graph?session_id=${SESSION}`)
+      .then((data) => setGraphData(data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [session]);
+
+  const nodes = graphData?.nodes || [];
+  const edges = graphData?.edges || [];
+
+  return (
+    <div className="space-y-6">
+      {/* Top Metrics HUD */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="p-4 rounded-lg bg-surface-container-low border border-white/[0.08]">
+          <span className="font-label-mono text-[10px] text-outline uppercase tracking-wider block">Graph Entities</span>
+          <span className="font-headline-lg text-xl font-bold text-primary">{nodes.length}</span>
+        </div>
+        <div className="p-4 rounded-lg bg-surface-container-low border border-white/[0.08]">
+          <span className="font-label-mono text-[10px] text-outline uppercase tracking-wider block">Knowledge Relations</span>
+          <span className="font-headline-lg text-xl font-bold text-secondary">{edges.length}</span>
+        </div>
+        <div className="p-4 rounded-lg bg-surface-container-low border border-white/[0.08]">
+          <span className="font-label-mono text-[10px] text-outline uppercase tracking-wider block">Vector DB Engine</span>
+          <span className="font-headline-lg text-xl font-bold text-emerald-400">ChromaDB</span>
+        </div>
+        <div className="p-4 rounded-lg bg-surface-container-low border border-white/[0.08]">
+          <span className="font-label-mono text-[10px] text-outline uppercase tracking-wider block">MCP Protocol</span>
+          <span className="font-headline-lg text-xl font-bold text-cyan-300">Ready</span>
+        </div>
+      </div>
+
+      {/* Filter Pills */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex gap-1.5 flex-wrap">
+          {["all", "document", "specification", "conflict", "task", "system"].map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setFilterType(t)}
+              className={`px-3 py-1 rounded-full text-xs font-label-mono transition-colors ${
+                filterType === t
+                  ? "bg-secondary text-on-secondary font-semibold"
+                  : "bg-surface-container text-on-surface-variant hover:text-primary"
+              }`}
+            >
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
+        <span className="text-[11px] font-label-mono text-outline">Click any entity in the network to inspect requirements context</span>
+      </div>
+
+      {/* Main Canvas + Inspector */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="lg:col-span-8 p-6 rounded-lg bg-surface-container-low border border-white/[0.08] relative min-h-[460px] overflow-hidden flex items-center justify-center">
+          {loading ? (
+            <div className="text-xs text-outline font-label-mono flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-secondary animate-ping" />
+              Synthesizing RAG knowledge graph...
+            </div>
+          ) : (
+            <svg viewBox="0 0 800 480" className="w-full h-full max-h-[500px] select-none">
+              <defs>
+                <linearGradient id="edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#7bd0ff" stopOpacity="0.7" />
+                  <stop offset="100%" stopColor="#94a3b8" stopOpacity="0.25" />
+                </linearGradient>
+              </defs>
+              {/* Render edges */}
+              {edges.map((e, idx) => {
+                const sIdx = nodes.findIndex((n) => n.id === e.source);
+                const tIdx = nodes.findIndex((n) => n.id === e.target);
+                if (sIdx === -1 || tIdx === -1) return null;
+                const total = nodes.length;
+                const angleS = (sIdx / total) * Math.PI * 2;
+                const angleT = (tIdx / total) * Math.PI * 2;
+                const x1 = 400 + Math.cos(angleS) * (sIdx === 0 ? 0 : 200);
+                const y1 = 240 + Math.sin(angleS) * (sIdx === 0 ? 0 : 150);
+                const x2 = 400 + Math.cos(angleT) * (tIdx === 0 ? 0 : 200);
+                const y2 = 240 + Math.sin(angleT) * (tIdx === 0 ? 0 : 150);
+                return (
+                  <g key={`edge-${idx}`}>
+                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="url(#edgeGrad)" strokeWidth="1.5" strokeDasharray="3 3" />
+                  </g>
+                );
+              })}
+              {/* Render nodes */}
+              {nodes.map((n, idx) => {
+                const total = nodes.length;
+                const angle = (idx / total) * Math.PI * 2;
+                const cx = 400 + Math.cos(angle) * (idx === 0 ? 0 : 200);
+                const cy = 240 + Math.sin(angle) * (idx === 0 ? 0 : 150);
+                const isSelected = selectedNode?.id === n.id;
+                const isDimmed = filterType !== "all" && n.type !== filterType;
+
+                return (
+                  <g
+                    key={n.id}
+                    onClick={() => setSelectedNode(n)}
+                    className="cursor-pointer transition-transform hover:scale-110"
+                    opacity={isDimmed ? 0.2 : 1}
+                  >
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={n.radius || 22}
+                      fill="#121318"
+                      stroke={n.color || "#38bdf8"}
+                      strokeWidth={isSelected ? 3.5 : 2}
+                      className={isSelected ? "filter drop-shadow-[0_0_14px_rgba(123,208,255,0.7)]" : ""}
+                    />
+                    <text
+                      x={cx}
+                      y={cy + 4}
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="9"
+                      fontFamily="JetBrains Mono"
+                      fontWeight="600"
+                    >
+                      {n.label.slice(0, 10)}
+                    </text>
+                    <text
+                      x={cx}
+                      y={cy + (n.radius || 22) + 14}
+                      textAnchor="middle"
+                      fill="#94a3b8"
+                      fontSize="8.5"
+                      fontFamily="Inter"
+                    >
+                      {n.label.length > 16 ? n.label.slice(0, 16) + "..." : n.label}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          )}
+        </div>
+
+        {/* Node Inspector Panel */}
+        <div className="lg:col-span-4 p-5 rounded-lg bg-surface-container-low border border-white/[0.08] space-y-4">
+          <div className="border-b border-white/[0.06] pb-3">
+            <span className="font-label-mono text-[10px] text-outline uppercase tracking-wider">Entity Inspector</span>
+            <h3 className="font-headline-md text-base text-primary font-bold mt-1">
+              {selectedNode ? selectedNode.label : "Select a Node"}
+            </h3>
+          </div>
+          {selectedNode ? (
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-label-mono uppercase" style={{ backgroundColor: `${selectedNode.color}25`, color: selectedNode.color }}>
+                  {selectedNode.type}
+                </span>
+                <span className="font-label-mono text-outline">ID: {selectedNode.id}</span>
+              </div>
+              <p className="text-on-surface-variant font-body-sm leading-relaxed whitespace-pre-wrap bg-surface-container p-3 rounded border border-white/[0.04]">
+                {selectedNode.details || "No extended requirements context."}
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-outline leading-relaxed">
+              Click any entity in the Knowledge Graph network to inspect its verified requirements, source connections, and architectural dependencies.
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -2285,6 +2655,7 @@ export default function App() {
   const [showScorecardModal, setShowScorecardModal] = useState(false);
   const [evidence, setEvidence] = useState(null);
   const [filePreviewModal, setFilePreviewModal] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Studio State
   const [files, setFiles] = useState([]);
@@ -2771,9 +3142,10 @@ export default function App() {
             <button
               type="button"
               onClick={() => setShowCopilot(true)}
-              className="text-on-surface-variant hover:text-on-surface transition-colors font-body-sm text-body-sm h-full flex items-center"
+              className="text-on-surface-variant hover:text-primary transition-colors font-body-sm text-body-sm h-full flex items-center gap-1.5"
             >
-              AI Assistant
+              <span className="material-symbols-outlined text-[16px] text-secondary">smart_toy</span>
+              <span>RAG Copilot</span>
             </button>
           </nav>
 
@@ -2781,7 +3153,7 @@ export default function App() {
           <div className="flex items-center gap-space-md shrink-0">
             {/* Active Gemini Model Badge */}
             <div
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-label-mono border transition-all ${
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-label-mono border transition-all ${
                 router?.switched || router?.fallback
                   ? "bg-amber-500/10 border-amber-500/40 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.2)]"
                   : "bg-surface-container-high border-white/[0.08] text-on-surface-variant"
@@ -2826,7 +3198,7 @@ export default function App() {
             {/* User Greeting & Sign In/Logout */}
             {user ? (
               <div className="flex items-center gap-2 pl-1.5 border-l border-white/[0.08]">
-                <div className="flex flex-col text-right">
+                <div className="hidden sm:flex flex-col text-right">
                   <span className="text-[10px] text-outline uppercase font-label-mono leading-none">Welcome</span>
                   <span className="text-xs font-semibold text-primary max-w-[130px] truncate leading-tight">
                     {user.name || user.email || "Engineer"}
@@ -2856,8 +3228,62 @@ export default function App() {
                 <span>Sign In</span>
               </button>
             )}
+
+            {/* Mobile Menu Hamburger Toggle */}
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="lg:hidden p-1.5 rounded-[6px] bg-surface-container border border-white/[0.08] text-on-surface hover:text-primary transition-colors flex items-center justify-center"
+              title="Toggle Navigation Menu"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                {mobileMenuOpen ? "close" : "menu"}
+              </span>
+            </button>
           </div>
         </div>
+
+        {/* Mobile Navigation Drawer */}
+        {mobileMenuOpen && (
+          <div className="lg:hidden w-full bg-surface-container-lowest/98 border-t border-b border-white/[0.1] px-4 py-3 space-y-1.5 backdrop-blur-2xl animate-in slide-in-from-top duration-200">
+            <button
+              type="button"
+              onClick={() => { setView("landing"); setMobileMenuOpen(false); }}
+              className={`w-full text-left py-2 px-3 rounded text-xs font-medium ${view === "landing" ? "bg-surface-container text-primary font-semibold" : "text-on-surface-variant hover:text-white"}`}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              onClick={() => { setView("studio"); setMobileMenuOpen(false); }}
+              className={`w-full text-left py-2 px-3 rounded text-xs font-medium ${view === "studio" ? "bg-surface-container text-primary font-semibold" : "text-on-surface-variant hover:text-white"}`}
+            >
+              Project Studio
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowScenarioModal(true); setMobileMenuOpen(false); }}
+              className="w-full text-left py-2 px-3 rounded text-xs font-medium text-on-surface-variant hover:text-white"
+            >
+              Scenario Simulator
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowScorecardModal(true); setMobileMenuOpen(false); }}
+              className="w-full text-left py-2 px-3 rounded text-xs font-medium text-on-surface-variant hover:text-white"
+            >
+              Quality Scorecard
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowCopilot(true); setMobileMenuOpen(false); }}
+              className="w-full text-left py-2 px-3 rounded text-xs font-medium text-secondary flex items-center justify-between bg-secondary/10 border border-secondary/20"
+            >
+              <span>Conversational RAG Copilot</span>
+              <span className="material-symbols-outlined text-[16px]">smart_toy</span>
+            </button>
+          </div>
+        )}
 
         {/* Model Switch / Failover Top Warning Banner */}
         {(router?.switched || router?.fallback || router?.switch_warning) && !warningDismissed && (
@@ -3439,8 +3865,18 @@ export default function App() {
                   disabled={sections.length === 0}
                   className="px-3 py-1.5 rounded-[4px] bg-surface-container hover:bg-surface-container-high border border-white/[0.06] text-xs font-label-mono text-white font-medium disabled:opacity-40"
                 >
-                  Export Specifications (.md)
+                  Export Specs (.md)
                 </button>
+                <a
+                  href={`/api/brd/pdf?session_id=${encodeURIComponent(SESSION)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-[4px] bg-secondary text-on-secondary hover:bg-secondary/90 border border-white/[0.06] text-xs font-label-mono font-medium flex items-center gap-1.5"
+                  title="Download executive-grade Business Requirements Document (BRD) as PDF"
+                >
+                  <span className="material-symbols-outlined text-[15px]">picture_as_pdf</span>
+                  <span>Export BRD (.pdf)</span>
+                </a>
                 <button
                   type="button"
                   onClick={resetWorkspace}
@@ -3487,7 +3923,7 @@ export default function App() {
                   />
                   <span className="material-symbols-outlined text-outline text-[32px] mb-2 block">cloud_upload</span>
                   <div className="font-medium text-xs text-primary">Drag & drop files or click to browse</div>
-                  <div className="text-[11px] text-outline mt-1">PDF, DOCX, TXT, CSV, JSON, PNG, JPG</div>
+                  <div className="text-[11px] text-outline mt-1">PDF, DOCX, TXT, CSV, JSON, PNG, JPG, ZIP, Audio Memos</div>
                 </div>
 
                 {uploading && (
@@ -3590,6 +4026,7 @@ export default function App() {
             <div className="flex gap-2 border-b border-white/[0.08] pb-2 overflow-x-auto">
               {[
                 { id: "specifications", label: "Specifications" },
+                { id: "graph", label: "Knowledge Graph" },
                 { id: "calendar", label: `Deadlines (${totalDeadlines})` },
                 { id: "wireframe", label: "Screen Prototypes" },
                 { id: "tests", label: "Acceptance Tests" },
@@ -3908,7 +4345,19 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {/* KNOWLEDGE GRAPH TAB */}
+            {studioTab === "graph" && (
+              <div className="space-y-6">
+                <KnowledgeGraphTab session={state} />
+              </div>
+            )}
           </div>
+        )}
+
+        {/* 3D Robot Floating Button (Bottom-Left in Studio) */}
+        {view === "studio" && (
+          <RobotRagButton onClick={() => setShowCopilot(true)} />
         )}
       </main>
 
@@ -4091,31 +4540,77 @@ export default function App() {
         </div>
       )}
 
-      {/* File Preview Modal */}
+      {/* Enhanced File Preview Modal */}
       {filePreviewModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-2xl bg-surface-container-low border border-white/[0.08] rounded-lg shadow-2xl p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
-              <div className="flex items-center gap-2.5">
-                <span className="material-symbols-outlined text-secondary text-[20px]">description</span>
-                <h3 className="font-headline-md text-sm text-primary">
-                  {filePreviewModal.filename || filePreviewModal.file_name || filePreviewModal.name || "File Preview"}
-                </h3>
-                {filePreviewModal.modality && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] uppercase font-label-mono bg-surface-container-high text-outline">
-                    {filePreviewModal.modality}
-                  </span>
-                )}
-                {(filePreviewModal.chunk_count || filePreviewModal.chunks_count) && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-label-mono bg-secondary/15 text-secondary">
-                    {filePreviewModal.chunk_count || filePreviewModal.chunks_count} chunk(s)
-                  </span>
-                )}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+          <div className="w-full max-w-3xl max-h-[90vh] bg-surface-container-low border border-white/[0.12] rounded-xl shadow-2xl p-6 flex flex-col space-y-4">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3 shrink-0">
+              <div className="flex items-center gap-2.5 truncate">
+                <span className="material-symbols-outlined text-secondary text-[22px]">
+                  {(filePreviewModal.filename || filePreviewModal.name || "").match(/\.(png|jpe?g|webp|gif|svg)$/i)
+                    ? "image"
+                    : (filePreviewModal.filename || filePreviewModal.name || "").match(/\.(mp3|wav|m4a|webm|ogg)$/i)
+                    ? "audiotrack"
+                    : (filePreviewModal.filename || filePreviewModal.name || "").match(/\.zip$/i)
+                    ? "folder_zip"
+                    : "description"}
+                </span>
+                <div className="truncate">
+                  <h3 className="font-headline-md text-sm text-primary font-semibold truncate">
+                    {filePreviewModal.filename || filePreviewModal.file_name || filePreviewModal.name || "File Preview"}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] uppercase font-label-mono bg-surface-container-high text-outline">
+                      {filePreviewModal.modality || "document"}
+                    </span>
+                    {(filePreviewModal.chunk_count || filePreviewModal.chunks_count) && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-label-mono bg-secondary/15 text-secondary">
+                        {filePreviewModal.chunk_count || filePreviewModal.chunks_count} chunk(s) indexed
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <button type="button" onClick={() => setFilePreviewModal(null)} className="text-outline hover:text-primary">✕</button>
+              <button
+                type="button"
+                onClick={() => setFilePreviewModal(null)}
+                className="w-7 h-7 rounded-full bg-surface-container hover:bg-surface-container-high text-outline hover:text-primary flex items-center justify-center transition-colors shrink-0"
+              >
+                ✕
+              </button>
             </div>
-            <div className="p-4 rounded bg-surface-container-lowest border border-white/[0.06] text-xs font-label-mono max-h-96 overflow-y-auto leading-relaxed text-on-surface-variant whitespace-pre-wrap">
-              {filePreviewModal.full_text || filePreviewModal.content || (filePreviewModal.chunks && filePreviewModal.chunks.map(c => c.text).join("\n\n---\n\n")) || "No content extracted."}
+
+            {/* Visual media preview if image */}
+            {((filePreviewModal.filename || filePreviewModal.name || "").match(/\.(png|jpe?g|webp|gif|bmp|svg)$/i) || filePreviewModal.modality === "image" || filePreviewModal.modality === "vision") && (
+              <div className="p-3 bg-surface-container-lowest rounded-lg border border-white/[0.06] flex flex-col items-center justify-center shrink-0">
+                <img
+                  src={`/api/upload/${encodeURIComponent(SESSION)}/raw/${encodeURIComponent(filePreviewModal.filename || filePreviewModal.file_name || filePreviewModal.name)}`}
+                  alt={filePreviewModal.filename || "Visual preview"}
+                  className="max-h-56 rounded object-contain border border-white/10 shadow-lg"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+                <span className="text-[10px] text-outline font-label-mono mt-1.5">Universal Multimodal Vision Ingestion</span>
+              </div>
+            )}
+
+            {/* Audio player if audio */}
+            {((filePreviewModal.filename || filePreviewModal.name || "").match(/\.(mp3|wav|m4a|webm|ogg)$/i) || filePreviewModal.modality === "audio") && (
+              <div className="p-3 bg-surface-container-lowest rounded-lg border border-white/[0.06] shrink-0">
+                <audio
+                  controls
+                  src={`/api/upload/${encodeURIComponent(SESSION)}/raw/${encodeURIComponent(filePreviewModal.filename || filePreviewModal.file_name || filePreviewModal.name)}`}
+                  className="w-full"
+                />
+                <div className="text-[10px] text-outline font-label-mono mt-1 text-center">Voice memo / meeting transcription recording</div>
+              </div>
+            )}
+
+            {/* Text extracted / chunk inspector */}
+            <div className="flex-1 min-h-[160px] p-4 rounded-lg bg-surface-container-lowest border border-white/[0.08] text-xs font-label-mono overflow-y-auto leading-relaxed text-on-surface-variant whitespace-pre-wrap selection:bg-secondary selection:text-black">
+              {filePreviewModal.full_text ||
+                filePreviewModal.content ||
+                (filePreviewModal.chunks && filePreviewModal.chunks.map((c, i) => `[Chunk ${i + 1} • ${c.page_or_ts || "excerpt"}]\n${c.text}`).join("\n\n---\n\n")) ||
+                "No content extracted."}
             </div>
           </div>
         </div>

@@ -5,11 +5,12 @@ import os
 import re
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel
 
 from fastapi import FastAPI, File, Form, Header, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
 from app import db
@@ -177,7 +178,7 @@ def router_switch(payload: dict):
 
 
 ALLOWED_EXTENSIONS = {
-    ".txt", ".md", ".eml", ".csv", ".pdf", ".docx", ".xlsx", ".xls",
+    ".txt", ".md", ".eml", ".csv", ".pdf", ".docx", ".xlsx", ".xls", ".zip",
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".mp3", ".wav", ".m4a", ".ogg",
     ".webm", ".weba", ".aac", ".flac", ".wma", ".wmb", ".wmv"
 }
@@ -217,6 +218,13 @@ async def upload(
     merged_chunks = [c for c in existing if c.file_name not in new_names] + new_chunks
     UPLOADS[session_id] = merged_chunks
     db.reset_ops(user["id"] if user else None)
+
+    # Automatically index all chunks into Vector Database
+    try:
+        from app.vector_store import vector_store
+        vector_store.add_chunks(session_id, merged_chunks)
+    except Exception:
+        pass
 
     # Return distinct list of uploaded files with metadata
     unique_files = []
@@ -305,6 +313,194 @@ def preview_file(session_id: str, filename: str):
         "content": full_text,
         "chunks": [{"page_or_ts": c.page_or_ts, "text": c.text} for c in file_chunks],
     }
+
+
+@app.get("/api/upload/{session_id}/raw/{filename}")
+def get_raw_file(session_id: str, filename: str):
+    """Serve raw uploaded file for images, audio playback, and document previews."""
+    safe_name = Path(filename).name
+    dest_path = settings.upload_dir / session_id / safe_name
+    if not dest_path.exists():
+        dest_path = Path(__file__).resolve().parent.parent / safe_name
+    if dest_path.exists():
+        return FileResponse(str(dest_path))
+    return JSONResponse({"error": "File not found"}, status_code=404)
+
+
+class RagChatPayload(BaseModel):
+    session_id: str = "demo"
+    message: str
+    history: Optional[List[Dict[str, str]]] = None
+
+
+@app.post("/api/rag/chat")
+async def rag_chat(payload: RagChatPayload):
+    """Conversational RAG endpoint: answers dynamic questions using vector search and strict clean formatting."""
+    session_id = payload.session_id or "demo"
+    user_query = payload.message.strip()
+    history = payload.history or []
+
+    if not user_query:
+        return {"reply": "Please ask any question about your specifications or uploaded data.", "sources": []}
+
+    # 1. Semantic search in vector store
+    from app.vector_store import vector_store
+    relevant_chunks = vector_store.search(session_id, user_query, top_k=6)
+
+    # 2. Extract current state specs & tasks
+    state = SESSIONS.get(session_id) or db.load_session(session_id) or {}
+    sections = state.get("sections", []) if isinstance(state, dict) else [s.model_dump() for s in getattr(state, "sections", [])]
+    tasks = state.get("tasks", []) if isinstance(state, dict) else [t.model_dump() for t in getattr(state, "tasks", [])]
+    conflicts = state.get("conflicts", []) if isinstance(state, dict) else [c.model_dump() for c in getattr(state, "conflicts", [])]
+
+    context_snippets = []
+    sources = []
+    for c in relevant_chunks:
+        meta = c.get("metadata", {})
+        fname = meta.get("file_name", "Ingested Document")
+        sources.append({"file_name": fname, "snippet": c.get("text", "")[:120]})
+        context_snippets.append(f"Source: {fname} ({meta.get('modality', 'text')}):\n{c.get('text', '')}")
+
+    if not context_snippets:
+        all_chunks = state.get("chunks", []) if isinstance(state, dict) else getattr(state, "chunks", [])
+        for c in all_chunks[:5]:
+            fname = c.get("file_name", "Document") if isinstance(c, dict) else getattr(c, "file_name", "Document")
+            txt = c.get("text", "") if isinstance(c, dict) else getattr(c, "text", "")
+            context_snippets.append(f"Source: {fname}:\n{txt[:500]}")
+            sources.append({"file_name": fname, "snippet": txt[:120]})
+
+    specs_summary = []
+    for s in sections[:5]:
+        s_title = s.get("title", "Spec") if isinstance(s, dict) else getattr(s, "title", "Spec")
+        s_content = s.get("content", "") if isinstance(s, dict) else getattr(s, "content", "")
+        specs_summary.append(f"- {s_title}: {s_content[:250]}")
+
+    conflicts_summary = []
+    for c in conflicts[:4]:
+        c_desc = c.get("description", "") if isinstance(c, dict) else getattr(c, "description", "")
+        conflicts_summary.append(f"- Conflict: {c_desc}")
+
+    context_text = "\n\n".join(context_snippets) if context_snippets else "No source documents uploaded yet."
+    specs_text = "\n".join(specs_summary) if specs_summary else "No formal specifications generated yet."
+    conflicts_text = "\n".join(conflicts_summary) if conflicts_summary else "No conflicts detected."
+
+    system_instruction = (
+        "You are Orbius Conversational RAG Copilot, an elite technical systems analyst and requirements engineer. "
+        "Answer the user's question with direct, insightful, and dynamic analysis based on the retrieved project context, "
+        "specifications, and data. NEVER give canned, repetitive, or generic replies. Answer the exact question asked.\n\n"
+        "STRICT FORMATTING REQUIREMENTS:\n"
+        "1. DO NOT use asterisks for bolding (NEVER output '**').\n"
+        "2. DO NOT use escaped backslashes (NEVER output '\\').\n"
+        "3. Use clean sentence casing, numbered steps (1., 2.), or bullet points with '•' or dashes '-'.\n"
+        "4. Keep your answer highly readable, professional, and clear."
+    )
+
+    history_formatted = []
+    for h in history[-6:]:
+        role = "User" if h.get("role") == "user" else "Assistant"
+        content = h.get("content", "").replace("**", "").replace("\\", "")
+        history_formatted.append(f"{role}: {content}")
+    history_text = "\n".join(history_formatted)
+
+    full_prompt = (
+        f"{system_instruction}\n\n"
+        f"=== RETRIEVED CONTEXT FROM INGESTED DOCUMENTS ===\n{context_text}\n\n"
+        f"=== CURRENT SPECIFICATIONS & ARCHITECTURE ===\n{specs_text}\n\n"
+        f"=== KNOWN CONFLICTS ===\n{conflicts_text}\n\n"
+        f"=== RECENT CONVERSATION ===\n{history_text}\n\n"
+        f"User Question: {user_query}\n\n"
+        "Orbius Copilot Response:"
+    )
+
+    try:
+        from app.config import settings
+        import os
+        from google import genai
+        api_key = settings.gemini_api_key or os.environ.get("GEMINI_API_KEY")
+        if api_key:
+            client = genai.Client(api_key=api_key)
+            resp = client.models.generate_content(
+                model=settings.primary_model,
+                contents=full_prompt
+            )
+            raw_reply = getattr(resp, "text", "") or ""
+        else:
+            raw_reply = f"Based on your documents: {context_snippets[0][:200] if context_snippets else 'No specifications found.'}"
+    except Exception as e:
+        raw_reply = f"Regarding '{user_query}': {context_snippets[0][:300] if context_snippets else 'Please ensure relevant files are uploaded.'}"
+
+    # Strip any stray '**' and '\\'
+    cleaned_reply = raw_reply.replace("**", "").replace("\\", "").replace("\r\n", "\n").strip()
+    return {
+        "reply": cleaned_reply,
+        "sources": sources[:4],
+        "model": settings.primary_model
+    }
+
+
+@app.get("/api/graph")
+def get_knowledge_graph(session_id: str = "demo"):
+    """Interactive Knowledge Graph / RAG Graph endpoint."""
+    from app.graph_generator import generate_knowledge_graph
+    state = SESSIONS.get(session_id) or db.load_session(session_id)
+    return generate_knowledge_graph(state)
+
+
+@app.get("/api/brd/pdf")
+def download_brd_pdf_stream(session_id: str = "demo"):
+    """Download executive Business Requirements Document (BRD) as high-grade PDF."""
+    from app.brd_pdf import generate_brd_pdf
+    state = SESSIONS.get(session_id) or db.load_session(session_id)
+    if not state:
+        return JSONResponse({"error": "Session state not found"}, status_code=404)
+    state_dict = state if isinstance(state, dict) else (state.model_dump() if hasattr(state, "model_dump") else {})
+    pdf_bytes = generate_brd_pdf(state_dict)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="Orbius_BRD_{session_id}.pdf"'}
+    )
+
+
+@app.get("/api/mcp/manifest")
+def mcp_manifest():
+    """Model Context Protocol (MCP) server manifest and tool capabilities."""
+    from app.mcp_server import AVAILABLE_MCP_TOOLS
+    return {
+        "name": "Orbius Autonomous BRD & RAG Server",
+        "version": "1.0.0",
+        "protocolVersion": "2024-11-05",
+        "description": "Model Context Protocol interface for Orbius multi-agent intelligence and specifications.",
+        "tools": [t.model_dump() for t in AVAILABLE_MCP_TOOLS]
+    }
+
+
+@app.get("/api/mcp/tools")
+def mcp_tools_list():
+    """List all available MCP tools."""
+    from app.mcp_server import AVAILABLE_MCP_TOOLS
+    return {"tools": [t.model_dump() for t in AVAILABLE_MCP_TOOLS]}
+
+
+@app.post("/api/mcp/tools/call")
+async def mcp_tools_call(payload: dict):
+    """Directly execute an MCP tool."""
+    name = payload.get("name")
+    arguments = payload.get("arguments", {})
+    from app.mcp_server import execute_mcp_tool
+    from app.pipeline import run_pipeline
+    res = await execute_mcp_tool(name, arguments, SESSIONS, run_pipeline)
+    return {"result": res}
+
+
+@app.post("/api/mcp/rpc")
+async def mcp_rpc(request: dict):
+    """Standard Model Context Protocol JSON-RPC 2.0 handler."""
+    from app.mcp_server import handle_mcp_rpc, MCPJsonRpcRequest
+    from app.pipeline import run_pipeline
+    req_obj = MCPJsonRpcRequest.model_validate(request)
+    resp = await handle_mcp_rpc(req_obj, SESSIONS, run_pipeline)
+    return resp.model_dump()
 
 
 @app.get("/api/session/new")

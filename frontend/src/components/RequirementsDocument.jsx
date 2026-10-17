@@ -1,3 +1,4 @@
+import { useState } from "react";
 import MermaidViewer from "./MermaidViewer";
 import { formatAgentName } from "./agentNames";
 
@@ -90,6 +91,7 @@ export default function RequirementsDocument({
   onResolveConflict,
   selectedFindingId,
 }) {
+  const [isArchitectureOpen, setIsArchitectureOpen] = useState(false);
   const findings = state?.findings || [];
   const chunks = state?.chunks || [];
   const conflicts = state?.conflicts || [];
@@ -171,7 +173,38 @@ export default function RequirementsDocument({
                     <h3>{section.title}</h3>
                   </header>
                   {section.id === "diagrams" ? (
-                    <MermaidViewer section={section} findings={findings} theme={theme} />
+                    <div style={{ marginTop: 6 }}>
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          width: "100%",
+                          padding: "10px 14px",
+                          background: "var(--elev-2)",
+                          border: "1px solid var(--line)",
+                          borderRadius: 8,
+                          cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                        onClick={() => setIsArchitectureOpen((prev) => !prev)}
+                        aria-expanded={isArchitectureOpen}
+                      >
+                        <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                          <span>🏗️</span> Architecture & Sequence Diagram
+                        </span>
+                        <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+                          {isArchitectureOpen ? "Hide Diagram ▲" : "Click to view architecture ▼"}
+                        </span>
+                      </button>
+                      {isArchitectureOpen && (
+                        <div style={{ marginTop: 12 }}>
+                          <MermaidViewer section={section} findings={findings} theme={theme} />
+                        </div>
+                      )}
+                    </div>
                   ) : section.id === "open_conflicts" ? (
                     conflicts.length > 0 ? conflicts.map((conflict) => (
                       <ConflictReview key={conflict.id} conflict={conflict} onResolve={onResolveConflict} />

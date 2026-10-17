@@ -84,31 +84,10 @@ Instructions:
     except Exception:
         pass
 
-    # Heuristic fallback if LLM offline
+    # Heuristic fallback if LLM offline: ground answer strictly in project findings and chunks
     lower_msg = message.lower()
-
-    if any(k in lower_msg for k in ["global warming", "climate change", "essay on", "write an essay", "draft an essay"]):
-        essay_body = """**Global Warming Key Summary:**
-- **Primary Driver**: Anthropogenic greenhouse emissions ($CO_2$ & $CH_4$) trapping infrared radiation.
-- **Key Impacts**: Polar ice retreat, sea-level rise, and heightened frequency of extreme weather events.
-- **Mitigation Mandate**: Decarbonization, renewable grid investment, and strict emissions governance."""
-        return ChatResponse(
-            reply=essay_body,
-            citations=[
-                ChatCitation(
-                    source_id=findings[0].source_id if findings else "src_transcript",
-                    file_name="voice_note.txt" if any("voice" in c.file_name for c in chunks) else "Project Evidence",
-                    snippet="Global warming is primarily driven by anthropogenic greenhouse gas emissions.",
-                    confidence=0.94,
-                )
-            ],
-            suggested_followups=[
-                "Summarize renewable energy targets",
-                "What are the primary economic risks?"
-            ]
-        )
-
     matched_findings = [f for f in findings if any(w in f.statement.lower() for w in lower_msg.split() if len(w) > 3)]
+
     if not matched_findings:
         matched_findings = findings[:3]
 

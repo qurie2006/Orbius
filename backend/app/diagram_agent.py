@@ -18,6 +18,62 @@ DEFAULT_MERMAID = """graph TD
     CoreLogic --> OpsNotify["📬 Ops & Notifications"]:::primary
 """
 
+def sanitize_mermaid(raw: str) -> str:
+    if not raw or not isinstance(raw, str):
+        return ""
+    lines = raw.strip().split("\n")
+    result = []
+    sub_count = 0
+    for line in lines:
+        trimmed = line.strip()
+        # Handle subgraph lines (e.g. subgraph Cloud Infrastructure ($180k Budget Cap) or subgraph Security & Auth)
+        if re.match(r"^subgraph\s+", trimmed, re.IGNORECASE):
+            rest = re.sub(r"^subgraph\s+", "", trimmed, flags=re.IGNORECASE).strip()
+            if rest.startswith('"') or re.match(r"^[a-zA-Z0-9_-]+\s*\[", rest):
+                result.append(line)
+            else:
+                clean_title = re.sub(r'["\[\]]', "", rest).replace("&", "and").strip()
+                sub_count += 1
+                indent = re.match(r"^\s*", line).group(0)
+                result.append(f'{indent}subgraph sg_{sub_count} ["{clean_title}"]')
+            continue
+
+        # Replace standalone & with 'and' to prevent Mermaid multi-node link syntax errors
+        sanitized_line = re.sub(r"(\s+)&(\s+)", r"\1and\2", line)
+
+        # 1. Database shapes [("text")]
+        sanitized_line = re.sub(
+            r'([a-zA-Z0-9_]+)\[\(\s*"?([^\n\)]*?)"?\s*\)\]',
+            lambda m: f'{m.group(1)}[("{m.group(2).replace(chr(34), chr(39))}")]',
+            sanitized_line,
+        )
+
+        # 2. Rounded shapes (["text"])
+        sanitized_line = re.sub(
+            r'([a-zA-Z0-9_]+)\(\[\s*"?([^\n\]]*?)"?\s*\]\)',
+            lambda m: f'{m.group(1)}(["{m.group(2).replace(chr(34), chr(39))}"])',
+            sanitized_line,
+        )
+
+        # 3. Decision shapes {"text"}
+        sanitized_line = re.sub(
+            r'([a-zA-Z0-9_]+)\{\s*"?([^\n\}]*?)"?\s*\}',
+            lambda m: f'{m.group(1)}{{"{m.group(2).replace(chr(34), chr(39))}"}}',
+            sanitized_line,
+        )
+
+        # 4. Standard rectangle shapes ["text"]
+        sanitized_line = re.sub(
+            r'([a-zA-Z0-9_]+)\[\s*"?([^\n\(\)\]]*?)"?\s*\]',
+            lambda m: f'{m.group(1)}["{m.group(2).replace(chr(34), chr(39))}"]',
+            sanitized_line,
+        )
+
+        result.append(sanitized_line)
+
+    return "\n".join(result)
+
+
 def generate_mermaid_diagrams(findings: list[Finding], chunks: list[SourceChunk]) -> dict[str, str]:
     context = "\n".join([f"- {f.type.upper()}: {f.statement} (Agent: {f.agent})" for f in findings[:25]])
     
@@ -31,9 +87,12 @@ Return a JSON object with exactly three keys:
 2. "user_flow": Mermaid flowchart LR or sequenceDiagram showing the user / stakeholder interaction flow.
 3. "sequence": Mermaid sequenceDiagram showing message flow between user, frontend, backend API, and database/external services.
 
-Important:
+CRITICAL SYNTAX RULES FOR MERMAID 12:
+- Always put double quotes inside every node bracket: e.g. A["API Gateway"] or DB[("Postgres DB")] or D{{"Auth Check"}}.
+- Never use unquoted parentheses or unquoted brackets inside labels.
+- Subgraphs MUST ALWAYS use the format: subgraph sg_id ["Subgraph Title"]. Never write raw unquoted subgraph titles.
+- Never use the raw '&' character anywhere; always write 'and'.
 - Return ONLY valid raw JSON with keys "architecture", "user_flow", "sequence".
-- In the Mermaid code, ensure all strings and nodes use standard valid Mermaid syntax. Do not wrap with markdown blocks inside the JSON string values.
 """
     try:
         raw = generate_json(prompt, purpose="diagram_agent")
@@ -46,10 +105,13 @@ Important:
             data = json.loads(cleaned)
             if isinstance(data, dict) and "architecture" in data:
                 fallback = _diagrams_from_findings(findings)
+                arch = sanitize_mermaid(data.get("architecture") or fallback["architecture"])
+                flow = sanitize_mermaid(data.get("user_flow") or fallback["user_flow"])
+                seq = data.get("sequence") or fallback["sequence"]
                 return {
-                    "architecture": data.get("architecture") or fallback["architecture"],
-                    "user_flow": data.get("user_flow") or fallback["user_flow"],
-                    "sequence": data.get("sequence") or fallback["sequence"],
+                    "architecture": arch or fallback["architecture"],
+                    "user_flow": flow or fallback["user_flow"],
+                    "sequence": seq or fallback["sequence"],
                 }
     except Exception:
         pass

@@ -1,0 +1,31 @@
+{
+  "dataset_name": "AetherCloud Enterprise Cloud SaaS Benchmark",
+  "total_documents": 4,
+  "ground_truth_findings_count": 12,
+  "planted_contradictions": [
+    {
+      "id": "conflict_timeline",
+      "topic": "Delivery Timeline Conflict (Q3 vs Q4)",
+      "left_source": "03_eng_standup_transcript.txt",
+      "left_statement": "Target launch is Q3 according to our customer roadmap",
+      "right_source": "02_legal_privacy_guidelines.eml",
+      "right_statement": "Go-live cannot occur before Q4 compliance sign-off"
+    },
+    {
+      "id": "conflict_retention_vs_erasure",
+      "topic": "Compliance Conflict: 7-Year Audit Retention vs. 30-Day GDPR Erasure",
+      "left_source": "01_cloud_security_memo.txt",
+      "left_statement": "retain all immutable telemetry, authentication logs, and data mutation trails for a minimum mandatory period of 7 years",
+      "right_source": "02_legal_privacy_guidelines.eml",
+      "right_statement": "complete deletion of all user activity data, telemetry records, and PII within 30 days of an erasure request"
+    },
+    {
+      "id": "conflict_sla_vs_budget",
+      "topic": "Infrastructure Conflict: 99.99% Multi-Region SLA vs. Single-Region Budget Cap",
+      "left_source": "01_cloud_security_memo.txt",
+      "left_statement": "guarantee 99.99% uptime availability across active-active multi-region clusters",
+      "right_source": "02_legal_privacy_guidelines.eml",
+      "right_statement": "Finance mandates that we remain strictly within a single-region deployment to preserve the $180,000 budget cap"
+    }
+  ]
+}

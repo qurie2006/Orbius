@@ -13,7 +13,7 @@ extracted from the user's uploaded files. No demo/training data is injected.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, List, Optional
 
 from app.schemas import Finding, Task
 
@@ -30,14 +30,14 @@ DEADLINE_RE = re.compile(
 BUDGET_WORDS = ("budget", "ceiling", "cap", "limit", "maximum", "cost", "spend", "funding")
 
 
-def _to_number(raw: str, suffix: str | None) -> float:
+def _to_number(raw: str, suffix: Optional[str]) -> float:
     value = float(raw.replace(",", ""))
     if suffix:
         value *= 1_000 if suffix.lower() == "k" else 1_000_000
     return value
 
 
-def parse_money(text: str) -> list[float]:
+def parse_money(text: str) -> List[float]:
     return [_to_number(m.group(1), m.group(2)) for m in MONEY_RE.finditer(text)]
 
 
@@ -234,46 +234,15 @@ def generate_ripple_graph(findings: list[Finding], tasks: list[Task]) -> dict[st
 
 
 # ---------------------------------------------------------------------------
-# Scorecard (static methodology benchmark, contains no project data)
+# Measured Accuracy & Validation Scorecard
 # ---------------------------------------------------------------------------
-def get_accuracy_scorecard() -> dict[str, Any]:
-    """Returns precision, recall, and grounding metrics comparing with vs. without Multi-Agent Validator."""
-    return {
-        "overall_fidelity": 98.4,
-        "metrics": [
-            {
-                "name": "Precision (Noise Rejection)",
-                "with_validator": 96.4,
-                "without_validator": 74.1,
-                "improvement": "+22.3%",
-                "detail": "Eliminates chit-chat, conversational filler, and ungrounded statements.",
-            },
-            {
-                "name": "Recall (Requirements Extraction)",
-                "with_validator": 94.8,
-                "without_validator": 82.3,
-                "improvement": "+12.5%",
-                "detail": "Specialist agents extract niche financial, compliance, and UI constraints.",
-            },
-            {
-                "name": "Conflict Resolution Accuracy",
-                "with_validator": 99.2,
-                "without_validator": 41.0,
-                "improvement": "+58.2%",
-                "detail": "Detects disagreements between sources (e.g. two different deadlines for the same item).",
-            },
-            {
-                "name": "Grounding Citation Integrity",
-                "with_validator": 99.1,
-                "without_validator": 68.4,
-                "improvement": "+30.7%",
-                "detail": "100% of statements are mapped directly to verifiable source text spans.",
-            },
-        ],
-        "latency_stats": {
-            "p50_ms": 280,
-            "p95_ms": 640,
-            "model_routing": "Gemini Flash -> Fallback -> Local Engine",
-            "cost_per_brd_usd": "$0.0018",
-        },
-    }
+def get_accuracy_scorecard(
+    findings: Optional[list[Finding]] = None,
+    chunks: Optional[list[SourceChunk]] = None,
+    conflicts: Optional[list[Any]] = None,
+    gaps: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    """Returns measured precision, recall, and grounding metrics derived from empirical validation."""
+    from app.eval_harness import compute_session_scorecard
+    return compute_session_scorecard(findings or [], chunks or [], conflicts or [], gaps or [])
+

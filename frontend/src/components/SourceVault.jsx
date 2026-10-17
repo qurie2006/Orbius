@@ -12,6 +12,11 @@ export default function SourceVault({
   running,
   onGenerate,
   VoiceRecorder,
+  sessionId,
+  projects = [],
+  onNewProject,
+  onSwitchProject,
+  onLoadDemo,
 }) {
   const fileInputRef = useRef(null);
   const previewCloseRef = useRef(null);
@@ -77,6 +82,77 @@ export default function SourceVault({
         </span>
       </header>
 
+      {/* Isolated Workspace Session Selector */}
+      <div
+        className="source-vault__workspace-bar"
+        style={{
+          padding: "10px 12px",
+          borderRadius: 8,
+          marginBottom: 12,
+          background: "color-mix(in srgb, var(--elev-2) 90%, var(--accent) 10%)",
+          border: "1px solid var(--line)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", minWidth: 0 }}>
+            <span>📁</span>
+            <span style={{ color: "var(--muted)", fontWeight: 500 }}>Project:</span>
+            <code style={{ fontFamily: "monospace", color: "var(--accent-text)", fontSize: "0.82rem", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {sessionId || "demo"}
+            </code>
+          </div>
+          {onNewProject && (
+            <button
+              type="button"
+              className="btn ghost"
+              style={{
+                fontSize: "0.74rem",
+                padding: "3px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--accent)",
+                color: "var(--accent-text)",
+                fontWeight: 600,
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+              onClick={onNewProject}
+              title="Generate a new isolated project session ID"
+            >
+              + New Project
+            </button>
+          )}
+        </div>
+
+        {projects && projects.length > 0 && onSwitchProject && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.74rem" }}>
+            <span style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>Switch:</span>
+            <select
+              value={sessionId || "demo"}
+              onChange={(e) => onSwitchProject(e.target.value)}
+              style={{
+                flex: 1,
+                fontSize: "0.75rem",
+                padding: "3px 8px",
+                borderRadius: 4,
+                background: "var(--elev-1)",
+                color: "var(--ink)",
+                border: "1px solid var(--line)",
+                cursor: "pointer",
+              }}
+            >
+              {projects.map((p) => (
+                <option key={p.session_id} value={p.session_id}>
+                  {p.session_id} ({p.files_count || 0} files) — {p.description || "Project"}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
       <button
         type="button"
         className={`source-vault__drop ${uploading ? "is-uploading" : ""}`}
@@ -109,6 +185,35 @@ export default function SourceVault({
           }}
         />
       </button>
+
+      {onLoadDemo && (
+        <button
+          type="button"
+          className="btn ghost"
+          style={{
+            width: "100%",
+            marginTop: 8,
+            marginBottom: 12,
+            padding: "8px 12px",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+            color: "var(--accent-text)",
+            border: "1px dashed var(--line)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            cursor: "pointer",
+          }}
+          disabled={uploading}
+          onClick={(e) => {
+            e.stopPropagation();
+            onLoadDemo();
+          }}
+        >
+          <span>⚡</span> Load AetherCloud Enterprise Pack (6 Files)
+        </button>
+      )}
 
       <div className="source-vault__section-heading">
         <div>

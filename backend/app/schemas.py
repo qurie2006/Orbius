@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -29,7 +29,9 @@ class SourceChunk(BaseModel):
     modality: Literal["text", "image", "pdf", "spreadsheet", "audio"]
     page_or_ts: str
     text: str
-    bbox: list[float] | None = None
+    bbox: Optional[List[float]] = None
+    image_path: Optional[str] = None
+
 
 
 class Finding(BaseModel):
@@ -41,9 +43,12 @@ class Finding(BaseModel):
     confidence: float = Field(ge=0, le=1)
     priority: Literal["low", "medium", "high"] = "medium"
     agent: str
-    owner: str | None = None
-    acceptance_criteria: str | None = None
+    owner: Optional[str] = None
+    acceptance_criteria: Optional[str] = None
     section: BrdSectionId = "functional_requirements"
+    method: Literal["model", "rule_based"] = "model"
+    grounded: bool = True
+
 
 
 class Conflict(BaseModel):
@@ -54,7 +59,7 @@ class Conflict(BaseModel):
     disagreement: str
     suggested_question: str
     status: Literal["open", "resolved"] = "open"
-    resolution: str | None = None
+    resolution: Optional[str] = None
 
 
 class OpsItem(BaseModel):
@@ -63,14 +68,14 @@ class OpsItem(BaseModel):
     source_id: str
     source_span: str
     confidence: float
-    payload: dict[str, Any]
+    payload: Dict[str, Any]
 
 
 class Task(BaseModel):
     id: str
     type: TaskType
     context: str
-    payload: dict[str, Any]
+    payload: Dict[str, Any]
     source_id: str
     source_span: str
     confidence: float
@@ -86,7 +91,7 @@ class Alert(BaseModel):
     context: str
     source_id: str
     status: AlertStatus = "pending"
-    fired_at: datetime | None = None
+    fired_at: Optional[datetime] = None
 
 
 class DelegationEvent(BaseModel):
@@ -101,24 +106,24 @@ class BrdSection(BaseModel):
     id: BrdSectionId
     title: str
     body: str
-    finding_ids: list[str] = []
+    finding_ids: List[str] = []
     streaming: bool = False
-    diagram_type: str | None = None  # e.g. "flowchart", "sequence", "architecture"
-    mermaid_code: str | None = None
-    user_flow_code: str | None = None
-    sequence_code: str | None = None
+    diagram_type: Optional[str] = None  # e.g. "flowchart", "sequence", "architecture"
+    mermaid_code: Optional[str] = None
+    user_flow_code: Optional[str] = None
+    sequence_code: Optional[str] = None
 
 
 class ChangelogEntry(BaseModel):
     version: int
     at: datetime
     summary: str
-    sections: list[str]
+    sections: List[str]
 
 
 class GenerateRequest(BaseModel):
     project_description: str = ""
-    session_id: str | None = None
+    session_id: Optional[str] = None
 
 
 class ResolveConflictRequest(BaseModel):
@@ -163,7 +168,7 @@ class CalendarEvent(BaseModel):
     status: str
     urgency: Literal["urgent", "due_tomorrow", "normal", "completed"]
     detail: str
-    source_span: str | None = None
+    source_span: Optional[str] = None
 
 
 # --- New Copilot Chat Schemas ---
@@ -175,7 +180,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str = "demo"
     message: str
-    history: list[ChatMessage] = []
+    history: List[ChatMessage] = []
 
 
 class ChatCitation(BaseModel):
@@ -187,8 +192,8 @@ class ChatCitation(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
-    citations: list[ChatCitation] = []
-    suggested_followups: list[str] = []
+    citations: List[ChatCitation] = []
+    suggested_followups: List[str] = []
 
 
 # --- New What-If Scenario Schemas ---
@@ -209,8 +214,8 @@ class ScenarioAffectedItem(BaseModel):
 class ScenarioResponse(BaseModel):
     scenario_title: str
     impact_summary: str
-    affected_items: list[ScenarioAffectedItem] = []
-    shifted_deadlines: list[dict[str, Any]] = []
-    new_risks: list[str] = []
-    diagram_diff_mermaid: str | None = None
+    affected_items: List[ScenarioAffectedItem] = []
+    shifted_deadlines: List[Dict[str, Any]] = []
+    new_risks: List[str] = []
+    diagram_diff_mermaid: Optional[str] = None
 

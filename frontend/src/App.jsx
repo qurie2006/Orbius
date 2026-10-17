@@ -9,7 +9,7 @@ import RequirementsDocument from "./components/RequirementsDocument";
 import SourceVault from "./components/SourceVault";
 import { formatAgentName } from "./components/agentNames";
 
-const SESSION = "demo";
+const DEFAULT_SESSION = "demo";
 
 mermaid.initialize({
   startOnLoad: false,
@@ -285,7 +285,7 @@ function VoiceRecorder({ onAudioRecorded }) {
 // ==========================================
 // FEATURE 2: Chat with BRD Copilot Drawer
 // ==========================================
-function CopilotDrawer({ isOpen, onClose, onOpenEvidence, sourceChunks = [] }) {
+function CopilotDrawer({ isOpen, onClose, onOpenEvidence, sourceChunks = [], sessionId }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
@@ -342,7 +342,7 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence, sourceChunks = [] }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: SESSION,
+          session_id: sessionId || DEFAULT_SESSION,
           message: text,
           history: nextHistory.map((m) => ({ role: m.role, content: m.content })),
         }),
@@ -464,7 +464,7 @@ function CopilotDrawer({ isOpen, onClose, onOpenEvidence, sourceChunks = [] }) {
 // ==========================================
 // FEATURE 5: Live What-If Scenario Simulator
 // ==========================================
-function ScenarioSimulatorModal({ isOpen, onClose }) {
+function ScenarioSimulatorModal({ isOpen, onClose, sessionId }) {
   const [activeScenario, setActiveScenario] = useState("budget_cut_30");
   const [customPrompt, setCustomPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -486,7 +486,7 @@ function ScenarioSimulatorModal({ isOpen, onClose }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: SESSION,
+          session_id: sessionId || DEFAULT_SESSION,
           scenario_type: scType,
           custom_prompt: scType === "custom" ? customPrompt : "",
         }),
@@ -1449,6 +1449,153 @@ function AccuracyScorecard({ isOpen, onClose }) {
     </div>
   );
 }
+// FEATURE: Orbius Mesh Ledger Verification
+// ==========================================
+function MeshLedgerModal({ isOpen, onClose, sessionId }) {
+  const [data, setData] = useState(null);
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("verify");
+
+  useEffect(() => {
+    if (isOpen) {
+      setLoading(true);
+      Promise.all([
+        jsonFetch(`/api/mesh/ledger/${sessionId || "demo"}/verify`),
+        jsonFetch(`/api/mesh/ledger/${sessionId || "demo"}/entries`),
+      ])
+        .then(([v, e]) => {
+          setData(v);
+          setEntries(e || []);
+        })
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    }
+  }, [isOpen, sessionId]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="auth-overlay" onClick={onClose}>
+      <div className="auth-card" style={{ width: "min(720px, 94vw)", maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div>
+            <h3 style={{ margin: "0 0 2px", display: "flex", alignItems: "center", gap: 8 }}>
+              <span>🛡️</span> Orbius Mesh · Cryptographic Audit Ledger
+            </h3>
+            <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
+              Immutable SHA-256 hash-chained DAG recording every requirement, conflict resolution, and human sign-off.
+            </p>
+          </div>
+          <button type="button" className="btn ghost" onClick={onClose}>✕</button>
+        </div>
+
+        {/* Verification Status Card */}
+        <div style={{
+          background: data?.valid ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
+          border: `1px solid ${data?.valid ? "#10b981" : "#ef4444"}`,
+          borderRadius: 12,
+          padding: 14,
+          marginBottom: 16
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <strong style={{ fontSize: "1.05rem", color: data?.valid ? "#34d399" : "#f87171" }}>
+                {loading ? "Verifying Hash Chain..." : data?.valid ? "✅ Cryptographic Chain Intact & Verified" : "⚠️ Integrity Alert: Tampering Detected"}
+              </strong>
+              <p className="muted" style={{ margin: "3px 0 0", fontSize: "0.8rem" }}>
+                {data?.message || "Auditing hash chain links across SQLite and peer vectors..."}
+              </p>
+            </div>
+            <span className="chip" style={{ background: data?.valid ? "#10b981" : "#ef4444", color: "#fff", fontWeight: 700 }}>
+              {data?.valid ? "ZERO TAMPERING" : "TAMPERED"}
+            </span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginTop: 12 }}>
+            <div style={{ background: "rgba(0,0,0,0.2)", padding: 8, borderRadius: 8 }}>
+              <span className="muted" style={{ fontSize: "0.7rem", display: "block" }}>Total Blocks</span>
+              <strong style={{ fontSize: "1.1rem" }}>{data?.blocks_count ?? entries.length}</strong>
+            </div>
+            <div style={{ background: "rgba(0,0,0,0.2)", padding: 8, borderRadius: 8 }}>
+              <span className="muted" style={{ fontSize: "0.7rem", display: "block" }}>Signed Approvals</span>
+              <strong style={{ fontSize: "1.1rem" }}>{data?.signed_approvals ?? 0}</strong>
+            </div>
+            <div style={{ background: "rgba(0,0,0,0.2)", padding: 8, borderRadius: 8 }}>
+              <span className="muted" style={{ fontSize: "0.7rem", display: "block" }}>DAG Head Hash</span>
+              <span style={{ fontSize: "0.75rem", fontFamily: "monospace", color: "var(--accent)" }}>
+                {data?.head_hash ? `${data.head_hash.slice(0, 10)}...${data.head_hash.slice(-6)}` : "Genesis Pending"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Tab switch */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button
+            type="button"
+            className={`btn ${activeTab === "verify" ? "primary" : "ghost"}`}
+            style={{ fontSize: "0.8rem" }}
+            onClick={() => setActiveTab("verify")}
+          >
+            Proof &amp; Standards
+          </button>
+          <button
+            type="button"
+            className={`btn ${activeTab === "blocks" ? "primary" : "ghost"}`}
+            style={{ fontSize: "0.8rem" }}
+            onClick={() => setActiveTab("blocks")}
+          >
+            Inspect Chained Blocks ({entries.length})
+          </button>
+        </div>
+
+        {activeTab === "verify" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: "0.84rem" }}>
+            <div style={{ padding: 12, borderRadius: 10, background: "var(--elev-2)", border: "1px solid var(--line)" }}>
+              <strong>🔒 Non-Repudiation Architecture (Tier 1.6 &amp; 2.5)</strong>
+              <p className="muted" style={{ margin: "4px 0 0", fontSize: "0.78rem" }}>
+                Every ingested requirement, human conflict override, and ops action generates an SHA-256 block cryptographically linked to the preceding block parent. Peer relays sync via CRDT state vectors without centralized lock contention.
+              </p>
+            </div>
+            <div style={{ padding: 12, borderRadius: 10, background: "var(--elev-2)", border: "1px solid var(--line)" }}>
+              <strong>📋 Compliance Alignment</strong>
+              <ul className="muted" style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: "0.78rem", lineHeight: 1.6 }}>
+                <li><strong>SOC-2 Type II Trust Services Criteria (CC6.1 - CC6.8):</strong> Immutable audit trail of specification state transitions.</li>
+                <li><strong>ISO/IEC 27001:2022 Control A.8.15:</strong> Logging and non-repudiation of requirements consensus.</li>
+                <li><strong>GDPR Article 17 Right-to-Erasure:</strong> PII is pseudonymized with deterministic salt hashes before chaining.</li>
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
+            {entries.length === 0 ? (
+              <p className="muted" style={{ fontSize: "0.82rem" }}>No ledger blocks generated yet. Ingest documents and generate a BRD to create block entries.</p>
+            ) : (
+              entries.map((e, idx) => (
+                <div key={e.id || idx} style={{ padding: "8px 12px", borderRadius: 8, background: "var(--elev-2)", border: "1px solid var(--line)", fontSize: "0.78rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontWeight: 700, color: "var(--accent)" }}>#{idx + 1} · {e.entry_type}</span>
+                    <span className="muted">{e.timestamp?.slice(11, 19) || ""}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 12, marginTop: 4, fontFamily: "monospace", fontSize: "0.72rem" }}>
+                    <span className="muted">Block: <span style={{ color: "#34d399" }}>{e.entry_hash?.slice(0, 10)}...</span></span>
+                    <span className="muted">Parent: {e.parent_hash?.slice(0, 10)}...</span>
+                    <span className="muted">Signer: {e.signer_id || "node-local"}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+          <button type="button" className="btn primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ==========================================
 // MAIN APPLICATION COMPONENT
@@ -1484,10 +1631,27 @@ export default function App() {
   const [sections, setSections] = useState([]);
   const [state, setState] = useState(null);
   const [events, setEvents] = useState([]);
-  const [router, setRouter] = useState(null);
+  const [router, setRouter] = useState({
+    active_model: "gemini-3.5-flash",
+    fallback: false,
+    is_offline: false,
+    indicator: "primary",
+    primary_model: "gemini-3.5-flash",
+  });
+  const prevModelRef = useRef(null);
+  const [modelChangeWarning, setModelChangeWarning] = useState(null);
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem("orbius_session_id") || DEFAULT_SESSION);
+  const [projects, setProjects] = useState([]);
+  const [showMeshModal, setShowMeshModal] = useState(false);
+  const [jiraPushResult, setJiraPushResult] = useState(null);
+  const [pushingJira, setPushingJira] = useState(false);
+
   const [tab, setTab] = useState("inbox"); // "inbox" | "timeline" | "calendar"
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [calendarMonth, setCalendarMonth] = useState(() => ({ year: 2026, month: 8 }));
 
   const [evidence, setEvidence] = useState(null);
   const [clock, setClock] = useState(null);
@@ -1537,12 +1701,29 @@ export default function App() {
   );
   const alerts = state?.alerts || [];
 
+  // Detect and warn when active model changes or failover occurs
+  useEffect(() => {
+    if (prevModelRef.current && router?.active_model && prevModelRef.current !== router.active_model) {
+      const isOffline = router.fallback || router.active_model === "offline-fallback";
+      setModelChangeWarning({
+        from: prevModelRef.current,
+        to: router.active_model,
+        isOffline,
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      });
+    }
+    if (router?.active_model) {
+      prevModelRef.current = router.active_model;
+    }
+  }, [router?.active_model, router?.fallback]);
+
   useEffect(() => {
     jsonFetch("/api/clock").then(setClock).catch(() => { });
     jsonFetch("/api/router").then(setRouter).catch(() => { });
     fetchCalendar();
-    fetchUserSession();
-  }, [user]);
+    fetchProjects();
+    fetchUserSession(sessionId);
+  }, [user, sessionId]);
 
   function showToast(msg) {
     setToast(msg);
@@ -1558,9 +1739,97 @@ export default function App() {
     }
   }
 
-  async function fetchUserSession() {
+  async function fetchProjects() {
     try {
-      const sess = await jsonFetch(`/api/session/${SESSION}`);
+      const list = await jsonFetch("/api/projects");
+      setProjects(list || []);
+    } catch (e) { }
+  }
+
+  async function createNewProject() {
+    try {
+      const res = await jsonFetch("/api/session/new", { method: "POST" });
+      const newId = res.session_id;
+      setSessionId(newId);
+      localStorage.setItem("orbius_session_id", newId);
+      setFiles([]);
+      setState(null);
+      setSections([]);
+      setEvents([]);
+      setDescription("");
+      showToast(`✨ Created isolated project: ${newId}`);
+      fetchProjects();
+    } catch (e) {
+      showToast(`Failed to create new project: ${e.message}`);
+    }
+  }
+
+  function switchProject(newId) {
+    if (!newId || newId === sessionId) return;
+    setSessionId(newId);
+    localStorage.setItem("orbius_session_id", newId);
+    setFiles([]);
+    setState(null);
+    setSections([]);
+    setEvents([]);
+    setDescription("");
+    fetchUserSession(newId);
+    showToast(`Switched to project: ${newId}`);
+  }
+
+  async function handleSwitchModel(targetModel) {
+    setShowModelDropdown(false);
+    try {
+      const res = await jsonFetch("/api/router/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: targetModel }),
+      });
+      setRouter((prev) => ({
+        ...prev,
+        active_model: res.active_model,
+        fallback: res.fallback,
+        is_offline: res.is_offline,
+        indicator: res.indicator,
+      }));
+      showToast(`Active AI model switched to ${res.active_model}`);
+    } catch (e) {
+      showToast(`Failed to switch model: ${e.message}`);
+    }
+  }
+
+  async function handleJiraPush() {
+    setPushingJira(true);
+    try {
+      const res = await jsonFetch(`/api/export/${sessionId}/jira/push`, { method: "POST" });
+      setJiraPushResult(res);
+    } catch (e) {
+      setJiraPushResult({ success: false, message: e.message });
+    } finally {
+      setPushingJira(false);
+    }
+  }
+
+  async function loadEnterpriseDemo() {
+    setUploading(true);
+    try {
+      const data = await jsonFetch(`/api/demo/load?session_id=${sessionId}`, { method: "POST" });
+      setFiles(data.files || []);
+      setDescription("AetherCloud enterprise cloud data lake migration with SOC2, GDPR, real-time analytics, and role-based access control.");
+      showToast(`⚡ Loaded AetherCloud Enterprise Pack (${data.files?.length || 6} files, ${data.count || 26} chunks) into ${sessionId}`);
+      fetchProjects();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to load demo pack: ${err.message}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function fetchUserSession(targetSessionId) {
+    const sid = targetSessionId || sessionId;
+    try {
+      const sess = await jsonFetch(`/api/session/${sid}`);
       if (sess && sess.sections && sess.sections.length > 0) {
         setState(sess);
         setSections(sess.sections);
@@ -1576,13 +1845,14 @@ export default function App() {
 
   async function resetWorkspace() {
     try {
-      await jsonFetch("/api/session/reset", { method: "POST" });
+      await jsonFetch(`/api/session/reset?session_id=${sessionId}`, { method: "POST" });
       setFiles([]);
       setState(null);
       setSections([]);
       setEvents([]);
       setDescription("");
-      showToast("Studio reset. Ready for your new project.");
+      showToast("Workspace reset. Ready for your new project.");
+      fetchProjects();
     } catch (e) {
       setFiles([]);
       setState(null);
@@ -1658,7 +1928,7 @@ export default function App() {
     setUploading(true);
     try {
       const body = new FormData();
-      body.append("session_id", SESSION);
+      body.append("session_id", sessionId);
       [...list].forEach((f) => body.append("files", f));
       const data = await jsonFetch("/api/upload", { method: "POST", body });
       setFiles(data.files || []);
@@ -1675,7 +1945,7 @@ export default function App() {
 
   async function removeFile(fileName) {
     try {
-      const data = await jsonFetch(`/api/upload/${SESSION}/${encodeURIComponent(fileName)}`, { method: "DELETE" });
+      const data = await jsonFetch(`/api/upload/${sessionId}/${encodeURIComponent(fileName)}`, { method: "DELETE" });
       setFiles(data.files || []);
       showToast(`Removed "${fileName}" from the active source list. Server-side cleanup is not confirmed.`);
       return true;
@@ -1687,7 +1957,7 @@ export default function App() {
 
   async function clearAllFiles() {
     try {
-      await jsonFetch(`/api/upload/${SESSION}`, { method: "DELETE" });
+      await jsonFetch(`/api/upload/${sessionId}`, { method: "DELETE" });
       setFiles([]);
       showToast("Cleared the active source list. Server-side cleanup is not confirmed.");
     } catch (err) {
@@ -1697,7 +1967,7 @@ export default function App() {
 
   async function openFilePreview(fileName) {
     try {
-      return await jsonFetch(`/api/upload/${SESSION}/preview/${encodeURIComponent(fileName)}`);
+      return await jsonFetch(`/api/upload/${sessionId}/preview/${encodeURIComponent(fileName)}`);
     } catch (err) {
       showToast(`Preview: ${err.message || "File preview unavailable"}`);
       return null;
@@ -1715,7 +1985,7 @@ export default function App() {
     setView("app");
     const token = localStorage.getItem("orbius_token");
     const headers = token ? { "x-user-id": token } : {};
-    const url = `/api/generate?session_id=${SESSION}&project_description=${encodeURIComponent(description)}`;
+    const url = `/api/generate?session_id=${sessionId}&project_description=${encodeURIComponent(description)}`;
 
     const es = new EventSource(url);
     es.addEventListener("section", (e) => {
@@ -1769,7 +2039,7 @@ export default function App() {
   }
 
   async function resolveConflict(id, keep) {
-    const next = await jsonFetch(`/api/conflicts/resolve?session_id=${SESSION}`, {
+    const next = await jsonFetch(`/api/conflicts/resolve?session_id=${sessionId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ conflict_id: id, keep, note: "Resolved in human review." }),
@@ -1812,7 +2082,7 @@ export default function App() {
     }
 
     try {
-      const next = await jsonFetch(`/api/session/${SESSION}`);
+      const next = await jsonFetch(`/api/session/${sessionId}`);
       setState(next);
       fetchCalendar();
     } catch (err) {
@@ -1841,9 +2111,7 @@ export default function App() {
 
   // Calendar Days computation
   const daysInMonth = useMemo(() => {
-    const now = clock?.now ? new Date(clock.now) : new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
+    const { year, month } = calendarMonth;
     const count = new Date(year, month + 1, 0).getDate();
     return Array.from({ length: count }, (_, i) => {
       const d = i + 1;
@@ -1854,7 +2122,7 @@ export default function App() {
       const hasNormal = evs.some((e) => e.urgency === "normal");
       return { day: d, dateStr, evs, hasUrgent, hasWarning, hasNormal };
     });
-  }, [clock, calendarEvents]);
+  }, [calendarEvents, calendarMonth]);
 
   const selectedDateEvents = useMemo(() => {
     return calendarEvents.filter((e) => e.date === selectedDate);
@@ -1874,12 +2142,118 @@ export default function App() {
           </div>
         </div>
         <div className="top-actions">
-          <span className="model-pill">
-            <span className={`dot ${router?.fallback ? "warn" : ""}`} />
-            {router?.active_model
-              ? `${routingStatusLabel(router)} · ${router.active_model}`
-              : routingStatusLabel(router)}
-          </span>
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="model-pill"
+              onClick={() => setShowModelDropdown(!showModelDropdown)}
+              style={{ cursor: "pointer", border: "1px solid var(--line)", background: "var(--elev-2)", display: "flex", alignItems: "center", gap: 6 }}
+              title="Click to switch active AI model or enable offline fallback"
+            >
+              <span className={`dot ${router?.fallback || router?.active_model === "offline-fallback" ? "warn" : ""}`} />
+              <span style={{ fontWeight: 600 }}>
+                {router?.active_model === "offline-fallback"
+                  ? "Offline Fallback"
+                  : router?.fallback
+                  ? "Fallback (quota hit)"
+                  : "Gemini Default"}
+              </span>
+              <span style={{ opacity: 0.75, fontSize: "0.75rem" }}>· {router?.active_model || "gemini-3.5-flash"} ▾</span>
+            </button>
+
+            {showModelDropdown && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  right: 0,
+                  background: "var(--elev-1, #111827)",
+                  border: "1px solid var(--line)",
+                  borderRadius: 10,
+                  padding: 8,
+                  minWidth: 260,
+                  boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
+                  zIndex: 1000,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                }}
+              >
+                <div style={{ padding: "4px 8px", fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
+                  Select AI Reasoning Engine
+                </div>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    background: router?.active_model === "gemini-3.5-flash" ? "color-mix(in srgb, var(--accent) 18%, transparent)" : "transparent",
+                    color: router?.active_model === "gemini-3.5-flash" ? "var(--accent-text)" : "var(--ink)",
+                    border: router?.active_model === "gemini-3.5-flash" ? "1px solid var(--accent)" : "1px solid transparent",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 2,
+                    cursor: "pointer",
+                  }}
+                  onClick={() => handleSwitchModel("gemini-3.5-flash")}
+                >
+                  <span style={{ fontWeight: 600, fontSize: "0.82rem" }}>⚡ Gemini 3.5 Flash (Default)</span>
+                  <span style={{ fontSize: "0.72rem", opacity: 0.75 }}>Primary multi-modal LLM reasoning engine</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    background: router?.active_model === "gemini-3.8-flash" ? "color-mix(in srgb, var(--accent) 18%, transparent)" : "transparent",
+                    color: router?.active_model === "gemini-3.8-flash" ? "var(--accent-text)" : "var(--ink)",
+                    border: router?.active_model === "gemini-3.8-flash" ? "1px solid var(--accent)" : "1px solid transparent",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 2,
+                    cursor: "pointer",
+                  }}
+                  onClick={() => handleSwitchModel("gemini-3.8-flash")}
+                >
+                  <span style={{ fontWeight: 600, fontSize: "0.82rem" }}>🚀 Gemini 3.8 Flash</span>
+                  <span style={{ fontSize: "0.72rem", opacity: 0.75 }}>Alternative high-throughput model</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    background: router?.active_model === "offline-fallback" ? "color-mix(in srgb, var(--accent) 18%, transparent)" : "transparent",
+                    color: router?.active_model === "offline-fallback" ? "var(--accent-text)" : "var(--ink)",
+                    border: router?.active_model === "offline-fallback" ? "1px solid var(--accent)" : "1px solid transparent",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 2,
+                    cursor: "pointer",
+                  }}
+                  onClick={() => handleSwitchModel("offline-fallback")}
+                >
+                  <span style={{ fontWeight: 600, fontSize: "0.82rem" }}>🔌 Offline Heuristic Mode (Fallback)</span>
+                  <span style={{ fontSize: "0.72rem", opacity: 0.75 }}>100% deterministic local rule extraction</span>
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             className="icon-btn theme-toggle"
             aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
@@ -1892,11 +2266,21 @@ export default function App() {
           <button
             type="button"
             className="btn ghost"
-            style={{ fontSize: "0.8rem" }}
+            style={{ fontSize: "0.8rem", color: "#34d399" }}
             onClick={() => setShowScorecard(true)}
-            title="View static validation benchmarks"
+            title="View Multi-Agent Accuracy & Grounding Scorecard"
           >
-            Scorecard
+            📊 Scorecard
+          </button>
+
+          <button
+            type="button"
+            className="btn ghost"
+            style={{ fontSize: "0.8rem", color: "#38bdf8" }}
+            onClick={() => setShowMeshModal(true)}
+            title="Inspect Orbius Mesh immutable SHA-256 DAG ledger and verify cryptographic integrity"
+          >
+            🛡️ Mesh Ledger
           </button>
 
           {user ? (
@@ -1941,6 +2325,61 @@ export default function App() {
           )}
         </div>
       </header>
+
+      {/* Warning Banner: Alert user when AI model is changed or fails over */}
+      {modelChangeWarning && (
+        <div
+          className="model-change-alert-banner"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 24px",
+            background: modelChangeWarning.isOffline
+              ? "linear-gradient(90deg, rgba(239, 68, 68, 0.22), rgba(245, 158, 11, 0.15))"
+              : "linear-gradient(90deg, rgba(56, 189, 248, 0.22), rgba(168, 85, 247, 0.15))",
+            borderBottom: `1px solid ${modelChangeWarning.isOffline ? "rgba(239, 68, 68, 0.4)" : "rgba(56, 189, 248, 0.4)"}`,
+            color: "var(--ink)",
+            fontSize: "0.85rem",
+            zIndex: 90,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: "1.2rem" }}>
+              {modelChangeWarning.isOffline ? "⚠️" : "🔄"}
+            </span>
+            <div>
+              <strong>Model Configuration Changed ({modelChangeWarning.time}):</strong>{" "}
+              Active model changed from <code style={{ padding: "2px 6px", borderRadius: 4, background: "rgba(255,255,255,0.08)" }}>{modelChangeWarning.from}</code> to{" "}
+              <code style={{ padding: "2px 6px", borderRadius: 4, background: "color-mix(in srgb, var(--accent) 25%, transparent)", fontWeight: 700 }}>{modelChangeWarning.to}</code>.
+              {" "}
+              {modelChangeWarning.isOffline
+                ? "The system is running on the Offline Heuristic Fallback engine."
+                : "The system is operating in Live Gemini Multi-Modal AI generation mode."}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {modelChangeWarning.isOffline && (
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ fontSize: "0.75rem", padding: "3px 10px", borderColor: "var(--accent)", color: "var(--accent-text)" }}
+                onClick={() => handleSwitchModel("gemini-3.5-flash")}
+              >
+                Switch back to Gemini
+              </button>
+            )}
+            <button
+              type="button"
+              className="file-remove-btn"
+              onClick={() => setModelChangeWarning(null)}
+              aria-label="Dismiss warning"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Accuracy Scorecard Modal */}
       <AccuracyScorecard isOpen={showScorecard} onClose={() => setShowScorecard(false)} />
@@ -2110,6 +2549,11 @@ export default function App() {
               running={running}
               onGenerate={generate}
               VoiceRecorder={VoiceRecorder}
+              sessionId={sessionId}
+              projects={projects}
+              onNewProject={createNewProject}
+              onSwitchProject={switchProject}
+              onLoadDemo={loadEnterpriseDemo}
             />
             <AnalysisTrace
               events={events.length ? events : state?.events || []}
@@ -2133,9 +2577,9 @@ export default function App() {
             theme={theme}
             views={{
               prototype: <InteractivePrototype findings={state?.findings || []} chunks={state?.chunks || []} />,
-              tests: <GherkinTestCases sessionId={SESSION} />,
-              ripple: <ImpactRippleGraph sessionId={SESSION} />,
-              meeting: <LiveMeetingMode sessionId={SESSION} onNewFinding={() => { }} />,
+              tests: <GherkinTestCases sessionId={sessionId} />,
+              ripple: <ImpactRippleGraph sessionId={sessionId} />,
+              meeting: <LiveMeetingMode sessionId={sessionId} onNewFinding={() => { }} />,
               trace: <DecisionTraceTimeline events={state?.events || events} router={router} state={state} />,
             }}
             onOpenEvidence={openEvidence}
@@ -2153,8 +2597,13 @@ export default function App() {
             drafts={drafts}
             alerts={alerts}
             state={state}
-            sessionId={SESSION}
+            sessionId={sessionId}
             onAct={act}
+            calendarMonth={calendarMonth}
+            setCalendarMonth={setCalendarMonth}
+            calendarEvents={calendarEvents}
+            onJiraPush={handleJiraPush}
+            pushingJira={pushingJira}
           />
         </main>
       )}
@@ -2177,13 +2626,68 @@ export default function App() {
         onClose={() => setShowCopilot(false)}
         onOpenEvidence={openCopilotEvidence}
         sourceChunks={state?.chunks || []}
+        sessionId={sessionId}
       />
 
       {/* FEATURE 5: What-If Scenario Simulator Modal */}
       <ScenarioSimulatorModal
         isOpen={showScenarioModal}
         onClose={() => setShowScenarioModal(false)}
+        sessionId={sessionId}
       />
+
+      {/* Orbius Mesh Ledger Verification Modal */}
+      <MeshLedgerModal
+        isOpen={showMeshModal}
+        onClose={() => setShowMeshModal(false)}
+        sessionId={sessionId}
+      />
+
+      {/* Atlassian Jira Cloud Push Modal */}
+      {jiraPushResult && (
+        <div className="auth-overlay" onClick={() => setJiraPushResult(null)}>
+          <div className="auth-card" style={{ width: "min(520px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <span>🔷</span> Atlassian Jira Cloud Sync
+              </h3>
+              <button className="file-remove-btn" onClick={() => setJiraPushResult(null)}>✕</button>
+            </div>
+
+            <div style={{
+              background: jiraPushResult.success ? "rgba(16, 185, 129, 0.12)" : "rgba(245, 158, 11, 0.12)",
+              border: `1px solid ${jiraPushResult.success ? "#10b981" : "#f59e0b"}`,
+              borderRadius: 12,
+              padding: 14,
+              fontSize: "0.85rem"
+            }}>
+              <strong style={{ color: jiraPushResult.success ? "#34d399" : "#f59e0b" }}>
+                {jiraPushResult.success ? "✅ Sync Successful / Staged" : "⚠️ Jira Notice"}
+              </strong>
+              <p style={{ margin: "6px 0 0", lineHeight: 1.5 }}>{jiraPushResult.message}</p>
+              {jiraPushResult.created_keys?.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <strong>Created Issues:</strong>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                    {jiraPushResult.created_keys.map((k) => (
+                      <span key={k} className="chip" style={{ background: "#0284c7", color: "#fff" }}>{k}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {jiraPushResult.staged_count > 0 && (
+                <p className="muted" style={{ marginTop: 8, fontSize: "0.8rem" }}>
+                  📦 {jiraPushResult.staged_count} specifications &amp; action items verified and formatted for Jira REST API v3 schema.
+                </p>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button type="button" className="btn primary" onClick={() => setJiraPushResult(null)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Email Dispatch Confirmation Modal */}
       {emailDispatchModal && (

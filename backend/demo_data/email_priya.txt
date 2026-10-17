@@ -1,0 +1,22 @@
+From: Priya Patel <priya.patel@aethercloud.io>
+To: Jordan Hale <jordan@orbius.dev>
+Date: 2026-10-17
+Subject: AetherCloud Enterprise Launch — Architecture & SLA Mandates
+
+Hi Jordan,
+
+We need the AetherCloud Enterprise SaaS architecture to guarantee 99.99% multi-region high availability across US-East and EU-West clusters with sub-250ms automated failover.
+
+Under our SOC-2 Type II audit requirements, all administrative authentication must strictly mandate hardware-backed FIDO2 WebAuthn multi-factor authentication (2FA). Passwords alone are prohibited.
+
+Also, our compliance charter requires immutable telemetry retention for 7 years without exception.
+
+Please email the client today confirming we received the architecture blueprints and that the SOC-2 security review is on the calendar.
+
+Target launch is locked for Q3 according to the board commitment.
+
+Budget ceiling is $180,000 including cloud compute, database replication, and Gemini AI agent pipelines.
+
+Thanks,
+Priya Patel
+VP of Cloud Infrastructure

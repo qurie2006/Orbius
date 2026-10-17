@@ -1,0 +1,21 @@
+From: Elena Vance <elena.vance@aethercloud.io>
+To: Jordan Hale <jordan@orbius.dev>
+Date: 2026-10-14T09:30:00Z
+Subject: Legal & Privacy Review — GDPR Compliance Constraints
+
+Jordan,
+
+Following up on our privacy council audit regarding EU market launch:
+
+1. Right-to-Erasure (GDPR Article 17):
+The platform must implement a cryptographically verified data purging mechanism that guarantees complete deletion of all user activity data, telemetry records, and PII within 30 days of an erasure request. Retaining user activity records beyond 30 days violates EU privacy regulations.
+
+2. Budget & Infrastructure Sovereign Guardrails:
+Finance has flagged that multi-region active-active clusters will incur $320,000 in egress and compute costs. Finance mandates that we remain strictly within a single-region deployment to preserve the $180,000 budget cap.
+
+3. Timeline:
+Legal compliance sign-off is scheduled for Quarter 4 (October/November). Go-live cannot occur before Q4 compliance sign-off.
+
+Best regards,
+Elena Vance
+Head of Legal & Compliance

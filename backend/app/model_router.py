@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set
 
 from app.config import settings
 
@@ -13,28 +14,46 @@ class QuotaExhausted(Exception):
 @dataclass
 class RouterState:
     simulate_quota_failure: bool = False
-    active_model: str | None = None
-    last_error: str | None = None
-    circuit_open_for: set[str] = field(default_factory=set)
-    log: list[dict] = field(default_factory=list)
+    active_model: str = settings.primary_model
+    last_error: Optional[str] = None
+    circuit_open_for: Set[str] = field(default_factory=set)
+    log: List[Dict] = field(default_factory=list)
 
 
 state = RouterState()
 
 
-def chain() -> list[str]:
+def chain() -> List[str]:
     return [settings.primary_model, settings.fallback_model, settings.last_resort_model]
 
 
 def current() -> dict:
-    active = state.active_model if (state.active_model and state.active_model != "gemini-2.0-flash") else settings.primary_model
+    active = state.active_model or settings.primary_model
+    is_offline = (active == "offline-fallback")
+    is_fallback = active != settings.primary_model
+    indicator = "offline" if is_offline else ("fallback" if is_fallback else "primary")
     return {
         "active_model": active,
-        "fallback": active != settings.primary_model,
+        "primary_model": settings.primary_model,
+        "is_offline": is_offline,
+        "fallback": is_fallback,
         "simulate_quota_failure": state.simulate_quota_failure,
         "log": state.log[-12:],
-        "indicator": "fallback" if active != settings.primary_model else "primary",
+        "indicator": indicator,
     }
+
+
+def set_active_model(model_name: str) -> dict:
+    prev = state.active_model
+    if model_name in ("offline", "offline-fallback", "offline-heuristic-fallback"):
+        state.active_model = "offline-fallback"
+        state.log.append({"purpose": "router", "from": prev, "model": "offline-fallback", "event": "switched_offline"})
+    elif model_name in (settings.primary_model, settings.fallback_model, settings.last_resort_model):
+        state.active_model = model_name
+        state.simulate_quota_failure = False
+        state.circuit_open_for.clear()
+        state.log.append({"purpose": "router", "from": prev, "model": model_name, "event": "switched_model"})
+    return current()
 
 
 def set_simulate(on: bool) -> dict:
@@ -52,19 +71,23 @@ def set_simulate(on: bool) -> dict:
 
 
 def _client():
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    api_key = settings.gemini_api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
     try:
         from google import genai
 
-        return genai.Client(api_key=api_key)
+        return genai.Client(api_key=api_key, http_options={"timeout": 12000})
     except Exception:
         return None
 
 
-def generate_json(prompt: str, *, purpose: str) -> str | None:
-    """Try models in the fallback chain. Returns None if no live model is available."""
+def generate_json(prompt: str, *, purpose: str) -> Optional[str]:
+    """Try models in the fallback chain. Returns None if no live model is available or offline mode active."""
+    if state.active_model == "offline-fallback":
+        state.log.append({"purpose": purpose, "model": "offline-fallback", "event": "offline_mode"})
+        return None
+
     client = _client()
     models = chain()
     if state.simulate_quota_failure and settings.primary_model in models:
@@ -73,8 +96,8 @@ def generate_json(prompt: str, *, purpose: str) -> str | None:
         models = models[1:]
 
     if client is None:
-        state.active_model = models[0] if models else settings.fallback_model
-        state.log.append({"purpose": purpose, "model": state.active_model, "event": "offline_demo"})
+        state.active_model = "offline-fallback"
+        state.log.append({"purpose": purpose, "model": "offline-fallback", "event": "offline_demo"})
         return None
 
     last_err = None

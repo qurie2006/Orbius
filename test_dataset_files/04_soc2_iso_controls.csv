@@ -1,0 +1,6 @@
+Control_ID,Framework,Requirement,Owner,Target_Frequency
+AC-1,SOC-2,Hardware Token FIDO2 WebAuthn Enforcement,Marcus Vance,Continuous
+AU-2,SOC-2,7-Year Immutable Telemetry & Log Retention,Priya Patel,Continuous
+PR-3,GDPR,30-Day User Data Purge on Erasure Request,Elena Vance,Automated Daily
+HA-4,SLA,99.99% Multi-Region Uptime Across US and EU,Priya Patel,Quarterly Audit
+SC-5,ISO 27001,AES-256 Encryption at Rest and TLS 1.3 in Transit,Marcus Vance,Continuous

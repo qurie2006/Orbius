@@ -6,7 +6,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from app.clock import get_now
 from app.config import settings
@@ -19,12 +19,66 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
-def hash_password(password: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), b"orbius_salt_2026", 100000).hex()
+import base64
+import hmac
+import secrets
+import time
 
 
-def verify_password(password: str, hashed: str) -> bool:
-    return hash_password(password) == hashed
+def hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
+    if not salt:
+        salt = secrets.token_hex(16)
+    hashed = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+    return hashed, salt
+
+
+def verify_password(password: str, hashed: str, salt: Optional[str] = None) -> bool:
+    if salt:
+        check_hash, _ = hash_password(password, salt)
+        return hmac.compare_digest(check_hash, hashed)
+    legacy_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), b"orbius_salt_2026", 100000).hex()
+    return hmac.compare_digest(legacy_hash, hashed)
+
+
+def create_session_token(user_id: str, email: str, expiry_hours: int = 72) -> str:
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).decode().rstrip("=")
+    exp = int(time.time()) + (expiry_hours * 3600)
+    payload_data = {"sub": user_id, "email": email, "exp": exp, "iat": int(time.time())}
+    payload = base64.urlsafe_b64encode(json.dumps(payload_data).encode()).decode().rstrip("=")
+    message = f"{header}.{payload}"
+    signature = hmac.new(settings.jwt_secret.encode(), message.encode(), hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(signature).decode().rstrip("=")
+    return f"{message}.{sig_b64}"
+
+
+def verify_session_token(token: str) -> Optional[dict]:
+    if not token:
+        return None
+    if token.startswith("Bearer "):
+        token = token[7:].strip()
+    parts = token.split(".")
+    if len(parts) == 3:
+        header_b64, payload_b64, sig_b64 = parts
+        message = f"{header_b64}.{payload_b64}"
+        expected_sig = base64.urlsafe_b64encode(hmac.new(settings.jwt_secret.encode(), message.encode(), hashlib.sha256).digest()).decode().rstrip("=")
+        if not hmac.compare_digest(expected_sig, sig_b64):
+            return None
+        try:
+            pad = len(payload_b64) % 4
+            if pad:
+                payload_b64 += "=" * (4 - pad)
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64).decode())
+            if payload.get("exp", 0) < int(time.time()):
+                return None
+            return payload
+        except Exception:
+            return None
+    # Backwards compatibility check for development if token is raw user_id
+    if token.startswith("usr_"):
+        user = get_user_by_id(token)
+        if user:
+            return {"sub": user["id"], "email": user["email"]}
+    return None
 
 
 def init_db() -> None:
@@ -35,6 +89,7 @@ def init_db() -> None:
                 id TEXT PRIMARY KEY,
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
+                salt TEXT,
                 name TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
@@ -67,29 +122,46 @@ def init_db() -> None:
                 updated_at TEXT,
                 user_id TEXT
             );
+            CREATE TABLE IF NOT EXISTS ledger_entries (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                entry_type TEXT NOT NULL,
+                parent_hash TEXT,
+                source_hash TEXT,
+                data_json TEXT NOT NULL,
+                signature TEXT,
+                signer_id TEXT,
+                entry_hash TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            );
             """
         )
-        # Migrations if user_id column missing in pre-existing tables
+        # Migrations if columns missing in pre-existing tables
         for table in ["tasks", "alerts", "sessions"]:
             try:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT")
             except sqlite3.OperationalError:
-                pass  # column already exists
+                pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN salt TEXT")
+        except sqlite3.OperationalError:
+            pass
 
 
-def create_user(email: str, password: str, name: str) -> dict[str, Any]:
+def create_user(email: str, password: str, name: str) -> Dict[str, Any]:
     user_id = f"usr_{uuid.uuid4().hex[:10]}"
     now_str = get_now().isoformat()
-    hashed = hash_password(password)
+    hashed, salt = hash_password(password)
     with connect() as conn:
         conn.execute(
-            "INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?, ?, ?, ?, ?)",
-            (user_id, email.lower().strip(), hashed, name.strip(), now_str),
+            "INSERT INTO users (id, email, password_hash, salt, name, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, email.lower().strip(), hashed, salt, name.strip(), now_str),
         )
     return {"id": user_id, "email": email.lower().strip(), "name": name.strip(), "created_at": now_str}
 
 
-def get_user_by_email(email: str) -> dict[str, Any] | None:
+
+def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     with connect() as conn:
         row = conn.execute("SELECT * FROM users WHERE LOWER(email) = ?", (email.lower().strip(),)).fetchone()
     if not row:
@@ -97,7 +169,7 @@ def get_user_by_email(email: str) -> dict[str, Any] | None:
     return dict(row)
 
 
-def get_user_by_id(user_id: str) -> dict[str, Any] | None:
+def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     with connect() as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     if not row:
@@ -105,7 +177,7 @@ def get_user_by_id(user_id: str) -> dict[str, Any] | None:
     return dict(row)
 
 
-def upsert_task(task: Task, user_id: str | None = None) -> None:
+def upsert_task(task: Task, user_id: Optional[str] = None) -> None:
     with connect() as conn:
         conn.execute(
             """
@@ -128,7 +200,7 @@ def upsert_task(task: Task, user_id: str | None = None) -> None:
         )
 
 
-def list_tasks(user_id: str | None = None) -> list[Task]:
+def list_tasks(user_id: Optional[str] = None) -> List[Task]:
     with connect() as conn:
         if user_id:
             rows = conn.execute("SELECT * FROM tasks WHERE user_id = ? OR user_id IS NULL ORDER BY created_at DESC", (user_id,)).fetchall()
@@ -150,7 +222,7 @@ def list_tasks(user_id: str | None = None) -> list[Task]:
     ]
 
 
-def set_task_status(task_id: str, status: str) -> Task | None:
+def set_task_status(task_id: str, status: str) -> Optional[Task]:
     with connect() as conn:
         conn.execute("UPDATE tasks SET status = ? WHERE id = ?", (status, task_id))
     for task in list_tasks():
@@ -159,7 +231,7 @@ def set_task_status(task_id: str, status: str) -> Task | None:
     return None
 
 
-def upsert_alert(alert: Alert, user_id: str | None = None) -> None:
+def upsert_alert(alert: Alert, user_id: Optional[str] = None) -> None:
     with connect() as conn:
         conn.execute(
             """
@@ -181,13 +253,13 @@ def upsert_alert(alert: Alert, user_id: str | None = None) -> None:
         )
 
 
-def list_alerts(user_id: str | None = None) -> list[Alert]:
+def list_alerts(user_id: Optional[str] = None) -> List[Alert]:
     with connect() as conn:
         if user_id:
             rows = conn.execute("SELECT * FROM alerts WHERE user_id = ? OR user_id IS NULL ORDER BY target_date", (user_id,)).fetchall()
         else:
             rows = conn.execute("SELECT * FROM alerts ORDER BY target_date").fetchall()
-    out: list[Alert] = []
+    out: List[Alert] = []
     for r in rows:
         out.append(
             Alert(
@@ -204,9 +276,9 @@ def list_alerts(user_id: str | None = None) -> list[Alert]:
     return out
 
 
-def fire_due_alerts(user_id: str | None = None) -> list[Alert]:
+def fire_due_alerts(user_id: Optional[str] = None) -> List[Alert]:
     now = get_now()
-    fired: list[Alert] = []
+    fired: List[Alert] = []
     for alert in list_alerts(user_id):
         if alert.status != "pending":
             continue
@@ -224,7 +296,7 @@ def fire_due_alerts(user_id: str | None = None) -> list[Alert]:
     return fired
 
 
-def save_session(session_id: str, payload: dict, user_id: str | None = None) -> None:
+def save_session(session_id: str, payload: Dict, user_id: Optional[str] = None) -> None:
     with connect() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO sessions (id, context_json, updated_at, user_id) VALUES (?, ?, ?, ?)",
@@ -258,12 +330,12 @@ def get_user_sessions(user_id: str) -> list[dict]:
     return res
 
 
-def get_calendar_events(user_id: str | None = None) -> list[dict[str, Any]]:
+def get_calendar_events(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     now = get_now()
     today_date = now.date()
     tomorrow_date = today_date + timedelta(days=1)
 
-    events: list[dict[str, Any]] = []
+    events: List[Dict[str, Any]] = []
 
     # Process Alerts
     for alert in list_alerts(user_id):

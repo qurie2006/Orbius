@@ -1,0 +1,10 @@
+Standup Transcript — AetherCloud Core Platform
+Date: 2026-10-15
+Attendees: Jordan Hale (PM), Marcus Vance (Security Eng), Priya Patel (Lead Architect), Aisha Lin (Design)
+
+Jordan: Let's review launch scope for the Enterprise Cloud SaaS console. Target launch is Q3 according to our customer roadmap.
+Priya: Timeline conflict — Elena from legal just confirmed compliance review cannot finish until Q4. Launching in Q3 would mean deploying without ISO 27001 certification.
+Marcus: Security requirement — FIDO2 WebAuthn is mandatory for all access. However, sales is asking for password-only guest checkout access for prospective clients.
+Jordan: We cannot bypass 2FA for guest links. Zero-Trust requires hardware MFA on all sessions.
+Priya: On offline resilience — DevOps engineers in field environments need an offline local-first sync buffer that can queue up to 50 administrative actions and converge with zero lost updates on reconnect.
+Aisha: Admin wireframe v3 specifies dark-mode UI with WCAG 2.2 AA accessibility and under 300ms p95 response time.

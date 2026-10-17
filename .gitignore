@@ -6,5 +6,12 @@ __pycache__
 backend/uploads
 backend/orbius.db
 .env
+backend/.env
 .DS_Store
 *.log
+backend/*.log
+frontend/*.log
+*.pid
+backend/*.pid
+frontend/*.pid
+

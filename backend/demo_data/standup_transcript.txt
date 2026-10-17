@@ -1,0 +1,12 @@
+Standup Transcript — AetherCloud Core Platform
+Attendees: Jordan Hale (PM), Marcus Vance (Security Eng), Priya Patel (Lead Architect), Aisha Lin (Design)
+
+Jordan: Scope is multi-tenant cloud console and CLI administration. Out of scope: legacy on-premise hypervisors.
+
+Aisha: Wireframe v3 shows the Zero-Trust security dashboard with hardware MFA enrollment, RBAC role management, and session revocation. Contrast on warning badges is now fully WCAG 2.2 compliant.
+
+Marcus: Risk — The external IdP SSO provider requires a 14-day change notice window. If we miss it we slip our certification milestone.
+
+Jordan: We need an owner for offline sync acceptance criteria. When DevOps engineers are disconnected, the local buffer must hold up to 50 administrative actions and converge with zero lost updates on reconnect.
+
+Priya: Stakeholders are Priya Patel (infrastructure sponsor), Elena Vance (compliance), and enterprise customer security leads.

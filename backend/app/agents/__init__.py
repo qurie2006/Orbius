@@ -4,6 +4,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional
 
 from app.clock import get_now
 from app.config import settings
@@ -15,7 +16,7 @@ def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
-def parse_json_payload(raw: str | None) -> list[dict]:
+def parse_json_payload(raw: Optional[str]) -> List[Dict]:
     if not raw:
         return []
     text = raw.strip()
@@ -48,6 +49,11 @@ def findings_from_dicts(rows: list[dict], agent: str, default_section: str) -> l
         if not row.get("statement") or not row.get("source_id"):
             continue
         try:
+            # Parse model confidence or calibrate
+            raw_conf = row.get("confidence")
+            conf = float(raw_conf) if raw_conf is not None else compute_dynamic_confidence(row["statement"])
+            conf = round(max(0.50, min(0.99, conf)), 2)
+
             out.append(
                 Finding(
                     id=row.get("id") or _id("f"),
@@ -55,12 +61,14 @@ def findings_from_dicts(rows: list[dict], agent: str, default_section: str) -> l
                     statement=row["statement"],
                     source_id=row["source_id"],
                     source_span=row.get("source_span") or row["statement"][:180],
-                    confidence=float(row.get("confidence") or 0.7),
+                    confidence=conf,
                     priority=row.get("priority") or "medium",
                     agent=agent,
                     owner=row.get("owner"),
                     acceptance_criteria=row.get("acceptance_criteria"),
                     section=row.get("section") or default_section,
+                    method="model",
+                    grounded=True,
                 )
             )
         except Exception:
@@ -69,13 +77,13 @@ def findings_from_dicts(rows: list[dict], agent: str, default_section: str) -> l
 
 
 def compute_dynamic_confidence(statement: str, source_text: str = "") -> float:
-    """Computes a realistic, variable confidence score based on linguistic clarity,
-    grounding, specificity, metrics, and modal certainty."""
+    """Computes a deterministic, calibrated confidence score based on linguistic clarity,
+    grounding, metrics, and modal certainty (no hash jitter)."""
     st_low = statement.lower().strip()
-    score = 0.76
+    score = 0.75
 
-    # 1. Concrete numbers, percentages, currency, dates boost confidence
-    if re.search(r"(\$\d+|\d+%\s*|\b\d{1,4}\s*(?:ms|sec|min|hours|days|weeks|months|users|baskets|kiosk)\b|q[1-4]|october|november|december|wcag|2fa)", st_low):
+    # 1. Concrete numbers, percentages, currency, dates, SLAs boost confidence
+    if re.search(r"(\$\d+|\d+%\s*|\b\d{1,4}\s*(?:ms|sec|min|hours|days|weeks|months|users|baskets|kiosk)\b|q[1-4]|october|november|december|wcag|2fa|sla|soc-2|iso)", st_low):
         score += 0.12
 
     # 2. Definite action verbs and strict modal requirements
@@ -92,115 +100,15 @@ def compute_dynamic_confidence(statement: str, source_text: str = "") -> float:
     elif len(statement) < 25:
         score -= 0.08
 
-    # 4. Hash-based subtle organic variance based on string characters
-    h = sum(ord(c) for c in statement) % 11  # -5% to +5%
-    score += (h - 5) * 0.01
-
-    # Clamp between 0.55 and 0.98
-    return round(max(0.55, min(0.98, score)), 2)
-
-
-def generate_topic_synthesis(topic: str, chunks: list[SourceChunk], agent: str) -> list[Finding]:
-    """Generates rich, intelligent essay and specification sections when the user provides
-    a prompt such as 'create an essay on global warming' or 'draft a brief on...'."""
-    findings: list[Finding] = []
-    chunk = chunks[0] if chunks else SourceChunk(source_id="src_voice", file_name="voice_note.txt", text=topic, modality="text")
-    clean_topic = re.sub(r"^(?:create|write|draft|make|generate|give me)\s+(?:an?\s+)?(?:essay|document|summary|report|note|article)\s+(?:on|about)?\s*", "", topic, flags=re.IGNORECASE).strip()
-    clean_topic = re.sub(r"\s+of\s+\d+\s+words.*$", "", clean_topic, flags=re.IGNORECASE).strip()
-    if not clean_topic:
-        clean_topic = topic
-
-    t_upper = clean_topic.capitalize()
-
-    # Dynamic structured essay & PRD generation
-    essay_structure = [
-        (
-            "objectives",
-            "requirement",
-            "high",
-            f"Analyze the fundamental drivers and global consequences of {clean_topic}.",
-            f"Objectives: Comprehensive analysis of {clean_topic} examining environmental, economic, and societal impact.",
-        ),
-        (
-            "functional_requirements",
-            "requirement",
-            "high",
-            f"Global warming is primarily driven by anthropogenic greenhouse gas emissions, particularly carbon dioxide and methane, which trap solar radiation in the Earth's atmosphere.",
-            f"Core Analysis: Atmospheric greenhouse gas concentrations have accelerated thermal absorption, leading to rising global mean temperatures and climatic instability.",
-        ),
-        (
-            "functional_requirements",
-            "requirement",
-            "medium",
-            f"Key repercussions include glacial retreats, accelerated sea-level rise, ocean acidification, and intensification of extreme meteorological phenomena across continents.",
-            f"Impact Assessment: Disruption of oceanic conveyor currents and amplified frequency of catastrophic droughts and cyclonic events.",
-        ),
-        (
-            "scope",
-            "decision",
-            "high",
-            f"Mitigation scope must prioritize clean energy transition, carbon capture deployment, and international policy compliance (e.g. Paris Agreement targets).",
-            f"Policy Scope: Decarbonization milestones targeting net-zero trajectory and sustainable industrial transformations.",
-        ),
-        (
-            "stakeholders",
-            "stakeholder",
-            "high",
-            f"Key stakeholders include international climate panels, national environmental ministries, energy sectors, and vulnerable coastal communities.",
-            f"Stakeholder Ecosystem: Intergovernmental bodies, scientific researchers, municipal planners, and frontline communities.",
-        ),
-        (
-            "risks",
-            "risk",
-            "high",
-            f"Irreversible environmental tipping points such as permafrost thawing and coral reef die-offs risk cascading ecological collapses if global temperatures exceed 1.5°C.",
-            f"Critical Risk: Ecological feedback loops and severe geopolitical displacement of vulnerable populations.",
-        ),
-        (
-            "budget",
-            "constraint",
-            "medium",
-            f"Global climate mitigation and renewable infrastructure investment requires estimated capital allocations exceeding $2.4 trillion annually by 2030.",
-            f"Financial Framework: Sustained capital mobilization for green energy grids and climate resilience adaptation.",
-        ),
-        (
-            "non_functional_requirements",
-            "constraint",
-            "medium",
-            f"Transition mandates require verifiable telemetry monitoring, continuous emissions auditing, and equitable carbon pricing mechanisms.",
-            f"Governance Metrics: Standardized MRV (Monitoring, Reporting, and Verification) protocols across multinational sectors.",
-        ),
-    ]
-
-    for sec, ftype, priority, statement, span in essay_structure:
-        conf = compute_dynamic_confidence(statement)
-        findings.append(
-            Finding(
-                id=_id("f"),
-                type=ftype,  # type: ignore[arg-type]
-                statement=statement,
-                source_id=chunk.source_id,
-                source_span=span,
-                confidence=conf,
-                priority=priority,  # type: ignore[arg-type]
-                agent=agent,
-                section=sec,  # type: ignore[arg-type]
-            )
-        )
-
-    return findings
+    # Clamped cleanly between 0.50 and 0.98
+    return round(max(0.50, min(0.98, score)), 2)
 
 
 def heuristic_findings(chunks: list[SourceChunk], agent: str) -> list[Finding]:
     findings: list[Finding] = []
-    blob = "\n".join(c.text for c in chunks).lower()
-
-    # Check if this is a general topic prompt or essay request (e.g., "global warming", "essay on", "create a...")
-    if any(k in blob for k in ["global warming", "climate change", "essay on", "write an essay", "draft an essay"]):
-        return generate_topic_synthesis(blob, chunks, agent)
-
-    # NOTE: Every finding below is derived strictly from text present in the
+    # Every finding below is derived strictly from text present in the
     # uploaded files. No canned/demo statements are injected.
+
 
     header_re = re.compile(r"^(from|to|cc|bcc|date|sent|subject|re|fw|fwd)\s*:", re.IGNORECASE)
     signoff_re = re.compile(r"^(thanks|thank you|regards|best|best regards|kind regards|cheers|sincerely|warm regards)[,!.\s]*$", re.IGNORECASE)
@@ -247,6 +155,8 @@ def heuristic_findings(chunks: list[SourceChunk], agent: str) -> list[Finding]:
                         priority="medium",
                         agent=agent,
                         section="stakeholders",
+                        method="rule_based",
+                        grounded=True,
                     )
                 )
 
@@ -296,10 +206,76 @@ def heuristic_findings(chunks: list[SourceChunk], agent: str) -> list[Finding]:
                         priority="high" if conf > 0.85 else "medium",
                         agent=agent,
                         section=sec,
+                        method="rule_based",
+                        grounded=True,
                     )
                 )
 
+
     return findings
+
+
+def extract_expressed_date(text: str, now: datetime) -> str:
+    t = text.lower()
+    year = now.year
+
+    # 1. Direct ISO date format: YYYY-MM-DD
+    iso_match = re.search(r'\b(20\d\d)-(\d{1,2})-(\d{1,2})\b', text)
+    if iso_match:
+        y, m, d = int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3))
+        return f"{y:04d}-{m:02d}-{d:02d}"
+
+    # 2. Quarters: Q3 (Sept 30), Q4 (Oct 31 / Nov), Q1 (Mar 31), Q2 (Jun 30)
+    if "q3" in t or "quarter 3" in t:
+        return f"{year}-09-30"
+    if "q4" in t or "quarter 4" in t or "october/november" in t:
+        return f"{year}-10-31"
+    if "q1" in t or "quarter 1" in t:
+        return f"{year}-03-31"
+    if "q2" in t or "quarter 2" in t:
+        return f"{year}-06-30"
+
+    # 3. Specific Month + Day patterns
+    months = {
+        "january": "01-31", "jan": "01-31", "february": "02-28", "feb": "02-28",
+        "march": "03-31", "mar": "03-31", "april": "04-30", "apr": "04-30",
+        "may": "05-31", "june": "06-30", "jun": "06-30", "july": "07-31", "jul": "07-31",
+        "august": "08-31", "aug": "08-31", "september": "09-30", "sep": "09-30", "sept": "09-30",
+        "october": "10-31", "oct": "10-31", "november": "11-30", "nov": "11-30",
+        "december": "12-31", "dec": "12-31"
+    }
+    for mname, mdef in months.items():
+        m_day = re.search(rf"\b{mname}\s+(\d{{1,2}})\b", t)
+        if m_day:
+            day = int(m_day.group(1))
+            m_num = mdef.split("-")[0]
+            return f"{year}-{m_num}-{day:02d}"
+        day_m = re.search(rf"\b(\d{{1,2}})\s+{mname}\b", t)
+        if day_m:
+            day = int(day_m.group(1))
+            m_num = mdef.split("-")[0]
+            return f"{year}-{m_num}-{day:02d}"
+
+    for mname, mdef in months.items():
+        if re.search(rf"\b{mname}\b", t):
+            return f"{year}-{mdef}"
+
+    # 4. Explicit day offset windows (e.g. 14-day notice, 30 days)
+    days_match = re.search(r"\b(\d+)[ -]?(?:day|days)\b", t)
+    if days_match:
+        n_days = int(days_match.group(1))
+        return (now + timedelta(days=n_days)).date().isoformat()
+
+    if "tomorrow" in t:
+        return (now + timedelta(days=1)).date().isoformat()
+    if "today" in t:
+        return now.date().isoformat()
+    if "next week" in t:
+        return (now + timedelta(days=7)).date().isoformat()
+    if "next month" in t:
+        return (now + timedelta(days=30)).date().isoformat()
+
+    return (now + timedelta(days=7)).date().isoformat()
 
 
 def heuristic_ops(chunks: list[SourceChunk]) -> list[OpsItem]:
@@ -346,19 +322,19 @@ def heuristic_ops(chunks: list[SourceChunk]) -> list[OpsItem]:
                 )
                 break
 
-            if any(k in llow for k in ["due", "deadline", "by next", "schedule", "target"]):
-                due_date = (now + timedelta(days=7)).date().isoformat()
+            if any(k in llow for k in ["due", "deadline", "by next", "schedule", "target", "launch", "window", "notice", "days"]):
+                due_date = extract_expressed_date(line, now)
                 items.append(
                     OpsItem(
                         type="scheduled_alert",
-                        context=f"Reminder: {line[:45]}",
+                        context=f"Deadline: {line[:45]}",
                         source_id=chunk.source_id,
                         source_span=line,
-                        confidence=0.88,
+                        confidence=0.92,
                         payload={
                             "target_date": f"{due_date}T09:00:00+00:00",
                             "original_phrase": line,
-                            "reminder_message": f"Action Item due: {line}",
+                            "reminder_message": f"Action Item due ({due_date}): {line}",
                         },
                     )
                 )
@@ -390,11 +366,14 @@ def run_ops(chunks: list[SourceChunk]) -> list[OpsItem]:
     prompt = f"""You are the Ops Agent. Today is {today}.
 Separate product REQUIREMENTS from project TASKS.
 Requirements are things the product must do (e.g. the app must support 2FA).
-Tasks are follow-ups (e.g. email the security team).
+Tasks are follow-ups (e.g. email the security team) and scheduled alerts.
 
-Never invent recipients. Use names/emails from sources or "Client (unspecified)".
-Convert relative dates to absolute ISO datetimes. Include original_phrase.
-Confidence threshold {settings.ops_confidence_threshold}. Cap {settings.max_ops_per_document} items.
+CRITICAL INSTRUCTION FOR DATES & DEADLINES:
+- Deliver the ACTUAL DATE or DEADLINE expressed in the document text.
+- If a quarter is specified (e.g. Q3 -> end of Q3 {today[:4]}-09-30; Q4 -> {today[:4]}-10-31), deliver that exact target date.
+- If an offset window is specified (e.g. 14-day notice, 30 days), compute the ISO date from today ({today}).
+- If an explicit calendar date is written (e.g. October 15, November 30), deliver that exact date in target_date.
+- Never invent arbitrary dates or default to 7 days.
 
 Return JSON array:
 {{"type":"draft_email|scheduled_alert","context":"","source_id":"","source_span":"","confidence":0.0,"payload":{{}}}}

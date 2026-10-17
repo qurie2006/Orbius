@@ -4,6 +4,7 @@ import csv
 import io
 import uuid
 from pathlib import Path
+from typing import List, Optional
 
 from app.schemas import SourceChunk
 
@@ -14,11 +15,11 @@ SHEET_EXT = {".xlsx", ".xls"}
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm", ".weba"}
 
 
-def _chunks_from_text(source_id: str, file_name: str, text: str, modality: str) -> list[SourceChunk]:
+def _chunks_from_text(source_id: str, file_name: str, text: str, modality: str) -> List[SourceChunk]:
     paragraphs = [p.strip() for p in text.replace("\r\n", "\n").split("\n\n") if p.strip()]
     if not paragraphs:
         paragraphs = [text.strip()] if text.strip() else []
-    out: list[SourceChunk] = []
+    out: List[SourceChunk] = []
     for i, para in enumerate(paragraphs, start=1):
         out.append(
             SourceChunk(
@@ -63,23 +64,59 @@ def _extract_docx(path: Path) -> str:
         return ""
 
 
-def ingest_file(path: Path, original_name: str | None = None) -> list[SourceChunk]:
+def ingest_file(path: Path, original_name: Optional[str] = None) -> List[SourceChunk]:
     name = Path(original_name or path.name).name
     ext = Path(name).suffix.lower()
     source_id = f"{Path(name).stem}_{uuid.uuid4().hex[:6]}"
 
     try:
         if ext in IMAGE_EXT:
+            from app.config import settings
+            import os
+            api_key = settings.gemini_api_key or os.environ.get("GEMINI_API_KEY")
+            description = ""
+            detected_bbox = [0.08, 0.12, 0.84, 0.62]
+            if api_key and path.exists():
+                try:
+                    from google import genai
+                    from google.genai import types
+                    mime = "image/png" if ext == ".png" else "image/jpeg"
+                    if ext == ".webp":
+                        mime = "image/webp"
+                    elif ext == ".gif":
+                        mime = "image/gif"
+                    client = genai.Client(api_key=api_key)
+                    image_bytes = path.read_bytes()
+                    res = client.models.generate_content(
+                        model=settings.primary_model,
+                        contents=[
+                            types.Part.from_bytes(data=image_bytes, mime_type=mime),
+                            (
+                                "Analyze this UI wireframe, architecture diagram, or screen capture in detail. "
+                                "Identify all user interface components, buttons, navigation flows, data entities, "
+                                "text labels, layout hierarchy, and functional requirements indicated. "
+                                "Provide a thorough textual specification of everything shown."
+                            ),
+                        ],
+                    )
+                    description = getattr(res, "text", "") or ""
+                except Exception as e:
+                    description = f"[Vision analysis for {name}: {str(e)}]"
+            if not description:
+                description = f"[Image uploaded: {name}. Visual layout and UI component wireframe.]"
+
             return [
                 SourceChunk(
                     source_id=source_id,
                     file_name=name,
                     modality="image",
                     page_or_ts="image",
-                    text=f"[Image uploaded: {name}]",
-                    bbox=[0.08, 0.12, 0.84, 0.62],
+                    text=description,
+                    bbox=detected_bbox,
+                    image_path=str(path),
                 )
             ]
+
 
         if ext in AUDIO_EXT:
             try:

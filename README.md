@@ -1,6 +1,6 @@
 # Orbius - Enterprise Multi-Agent BRD Studio
 
-> **Scattered inputs. A living BRD. Follow-ups that do not vanish.**  
+> **Scattered inputs. A living BRD, Follow-ups that do not vanish.**  
 > Built for the **Google Cloud & Gemini AI Hackathon** · Enterprise Architecture Track.
 
 [![Gemini 3.8 Flash](https://img.shields.io/badge/Gemini-3.8_Flash-blue?logo=google)](https://ai.google.dev/)

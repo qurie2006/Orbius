@@ -54,6 +54,7 @@ Determine:
 3. What target dates or deadlines shift.
 4. What new risks are introduced.
 5. A simple Mermaid graph LR or TD showing the downstream ripple effect.
+   IMPORTANT: Do NOT prefix node labels with internal hashes or IDs like "f_a4f247e3:". Use clean, human-readable labels (e.g. "Budget Cut" --> "Budget Ceiling Pressure" --> "Risk: SLA Downtime").
 
 Return a JSON object with keys:
 - "scenario_title": string
@@ -84,13 +85,20 @@ Return a JSON object with keys:
                         ))
                     except Exception:
                         pass
+                raw_diff = data.get("diagram_diff_mermaid")
+                from app.diagram_agent import sanitize_mermaid
+                if raw_diff:
+                    # Strip any raw f_xxxx: internal IDs or random hashes
+                    raw_diff = re.sub(r'f_[a-zA-Z0-9_]+:\s*', '', raw_diff)
+                    raw_diff = re.sub(r'\b[a-f0-9]{8}:?\s*', '', raw_diff)
+                sanitized_diff = sanitize_mermaid(raw_diff) if raw_diff else None
                 return ScenarioResponse(
                     scenario_title=data.get("scenario_title", title),
                     impact_summary=data.get("impact_summary", ""),
                     affected_items=affected,
                     shifted_deadlines=data.get("shifted_deadlines", []),
                     new_risks=data.get("new_risks", []),
-                    diagram_diff_mermaid=data.get("diagram_diff_mermaid"),
+                    diagram_diff_mermaid=sanitized_diff,
                 )
     except Exception:
         pass

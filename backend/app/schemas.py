@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 FindingType = Literal["requirement", "stakeholder", "constraint", "risk", "decision"]
-TaskType = Literal["draft_email", "scheduled_alert"]
+TaskType = Literal["draft_email", "scheduled_alert", "conflict_resolution"]
 TaskStatus = Literal["pending", "approved", "dismissed"]
 AlertStatus = Literal["pending", "fired", "dismissed"]
 BrdSectionId = Literal[
@@ -106,12 +106,19 @@ class BrdSection(BaseModel):
     id: BrdSectionId
     title: str
     body: str
+    content: Optional[str] = None
     finding_ids: List[str] = []
     streaming: bool = False
     diagram_type: Optional[str] = None  # e.g. "flowchart", "sequence", "architecture"
     mermaid_code: Optional[str] = None
     user_flow_code: Optional[str] = None
     sequence_code: Optional[str] = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.content and self.body:
+            self.content = self.body
+        elif not self.body and self.content:
+            self.body = self.content
 
 
 class ChangelogEntry(BaseModel):
@@ -128,7 +135,7 @@ class GenerateRequest(BaseModel):
 
 class ResolveConflictRequest(BaseModel):
     conflict_id: str
-    keep: Literal["left", "right", "both", "neither"]
+    keep: Literal["left", "right", "both", "neither", "a", "b"]
     note: str = ""
 
 

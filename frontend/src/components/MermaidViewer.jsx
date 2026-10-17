@@ -66,10 +66,16 @@ export default function MermaidViewer({ section, findings, theme }) {
       const code = diagrams[activeTab] || diagrams.architecture;
       const id = `mermaid-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       try {
+        if (typeof document !== "undefined") {
+          document.querySelectorAll("[id^='dmermaid'], [id^='d-']").forEach((el) => el.remove());
+        }
         const { svg } = await mermaid.render(id, code);
         if (isMounted) setSvgContent(svg);
       } catch (error) {
-        console.error("Mermaid render error:", error);
+        console.warn("Mermaid render error:", error);
+        if (typeof document !== "undefined") {
+          document.querySelectorAll("[id^='dmermaid'], [id^='d-']").forEach((el) => el.remove());
+        }
         if (isMounted) {
           setSvgContent(`<div style="padding: 14px; color: var(--muted); font-size: 0.85rem;">Rendering diagram...</div>`);
         }

@@ -176,21 +176,43 @@ def heuristic_findings(chunks: list[SourceChunk], agent: str) -> list[Finding]:
             if clean.endswith(":") and len(clean.split()) <= 6:
                 continue
 
-            # Determine section by keywords or chunk modality
-            sec = "functional_requirements"
             clow = clean.lower()
-            if "budget" in clow or "cost" in clow or "$" in clow or "price" in clow:
+
+            # Skip document banners, titles, and file notes
+            if any(w in clow for w in [
+                "specification brief", "pdf extract", "word extract", "confidential",
+                "table of contents", "document revision", "all rights reserved",
+                "proprietary", "internal only", "draft v", "meeting notes"
+            ]):
+                continue
+
+            orig_lower = line.lower()
+
+            # Strip lead section labels to make requirements concise
+            clean = re.sub(
+                r"^(objective|functional requirements|non-functional requirements|open question|requirement|scope|action required today|mandatory 2fa requirement|budget ceiling)\s*:\s*",
+                "",
+                clean,
+                flags=re.IGNORECASE
+            ).strip()
+            clow = clean.lower()
+
+            # Determine section by keywords from original line and content
+            sec = "functional_requirements"
+            if "objective" in orig_lower or "goal" in orig_lower or "target outcome" in orig_lower:
+                sec = "objectives"
+            elif "scope" in orig_lower or "out of scope" in orig_lower:
+                sec = "scope"
+            elif "open question" in orig_lower or "who owns" in clow or "unresolved" in orig_lower:
+                sec = "open_conflicts"
+            elif "budget" in clow or "cost" in clow or "$" in clow or "price" in clow:
                 sec = "budget"
             elif "risk" in clow or "delay" in clow or "slip" in clow or "hazard" in clow or "vulnerability" in clow:
                 sec = "risks"
             elif "stakeholder" in clow or "owner" in clow or "client" in clow or "team" in clow or "sponsor" in clow:
                 sec = "stakeholders"
-            elif "scope" in clow or "out of" in clow or "boundary" in clow:
-                sec = "scope"
-            elif "latency" in clow or "security" in clow or "performance" in clow or "compliance" in clow:
+            elif "latency" in clow or "security" in clow or "performance" in clow or "compliance" in clow or "sla" in clow or "availability" in clow or "uptime" in clow:
                 sec = "non_functional_requirements"
-            elif "goal" in clow or "objective" in clow or "target" in clow or "aim" in clow:
-                sec = "objectives"
 
             # Avoid duplicates
             if not any(f.statement == clean for f in findings):

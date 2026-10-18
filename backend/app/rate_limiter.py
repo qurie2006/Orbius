@@ -91,8 +91,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Only apply rate limiting to /api endpoints, exclude static or health checks
-        if not path.startswith("/api") or path == "/api/health" or request.method == "OPTIONS":
+        # Only apply rate limiting to /api endpoints; exclude static, health check endpoints, and HEAD/OPTIONS probes
+        if (
+            not path.startswith("/api")
+            or path in ("/api/health", "/health", "/", "/ping")
+            or request.method in ("HEAD", "OPTIONS")
+        ):
             return await call_next(request)
 
         client_id = get_client_identifier(request)

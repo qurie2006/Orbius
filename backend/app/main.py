@@ -7,12 +7,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
-
 from fastapi import FastAPI, File, Form, Header, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sse_starlette.sse import EventSourceResponse
-
 from app import db
 from app.clock import fast_forward, get_now, offset_days, reset_clock
 from app.config import settings
@@ -40,7 +38,6 @@ from app.jira_export import generate_jira_csv, generate_linear_json, push_to_jir
 from app.mesh.ledger import HashChainedLedger
 from app.mesh.relay import mesh_manager
 
-
 app = FastAPI(title="Orbius", version="0.1.0")
 cors_origins_list = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 app.add_middleware(
@@ -55,8 +52,6 @@ app.add_middleware(RateLimitMiddleware)
 
 db.init_db()
 UPLOADS: dict[str, list] = {}
-
-
 def get_auth_user(authorization: Optional[str] = Header(None), x_user_id: Optional[str] = Header(None)) -> Optional[dict]:
     token = authorization or x_user_id
     if not token:
@@ -124,9 +119,12 @@ def set_uploads_cache(session_id: str, chunks: list, user: Optional[dict] = None
     UPLOADS[f":{session_id}"] = chunks
 
 
+@app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/ping", methods=["GET", "HEAD"])
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 def health():
-    return {"ok": True, "name": "Orbius", "now": get_now().isoformat()}
+    return {"ok": True, "name": "Orbius", "status": "healthy", "now": get_now().isoformat()}
 
 
 @app.post("/api/auth/signup")

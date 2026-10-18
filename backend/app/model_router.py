@@ -28,7 +28,7 @@ state = RouterState()
 def chain() -> List[str]:
     seen = set()
     models = []
-    for m in [settings.primary_model, settings.fallback_model, "gemini-3.7-flash", "gemini-3.1-flash-lite", settings.last_resort_model]:
+    for m in [settings.primary_model, settings.fallback_model, "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", settings.last_resort_model]:
         if m and m not in seen:
             seen.add(m)
             models.append(m)
@@ -103,7 +103,7 @@ def _client():
     try:
         from google import genai
 
-        return genai.Client(api_key=api_key, http_options={"timeout": 20.0})
+        return genai.Client(api_key=api_key, http_options={"timeout": 30000.0})
     except Exception:
         return None
 

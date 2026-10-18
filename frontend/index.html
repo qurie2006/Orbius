@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,300;1,400;1,500;1,600;1,700&family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,300;1,400;1,500;1,600;1,700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
     rel="stylesheet" />
   <link
     href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
@@ -21,59 +21,45 @@
       theme: {
         extend: {
           colors: {
-            "on-secondary-container": "#00374d",
-            "primary-container": "#e0e3e5",
-            "inverse-surface": "#e3e1e9",
-            "surface-dim": "#121318",
-            "error": "#ffb4ab",
-            "surface-container-highest": "#34343a",
-            "on-primary-fixed-variant": "#444749",
-            "surface-variant": "#34343a",
-            "on-tertiary-container": "#007350",
-            "inverse-primary": "#5c5f61",
-            "on-primary-fixed": "#191c1e",
-            "outline": "#8e9193",
-            "surface-container-high": "#292a2f",
-            "on-surface-variant": "#c4c7c9",
-            "surface-bright": "#38393f",
-            "primary-fixed": "#e0e3e5",
-            "on-primary-container": "#626567",
-            "tertiary-container": "#f3f4f6",
-            "on-tertiary-fixed": "#111827",
-            "tertiary": "#ffffff",
-            "on-error-container": "#ffdad6",
-            "on-secondary-fixed-variant": "#004c69",
-            "on-background": "#e3e1e9",
-            "on-secondary": "#00354a",
-            "surface-tint": "#c4c7c9",
-            "surface-container": "#1e1f25",
-            "tertiary-fixed": "#f3f4f6",
-            "on-error": "#690005",
-            "on-secondary-fixed": "#001e2c",
-            "on-tertiary-fixed-variant": "#374151",
-            "background": "#121318",
-            "on-tertiary": "#111827",
-            "error-container": "#93000a",
-            "secondary-container": "#00a6e0",
-            "surface": "#121318",
-            "on-surface": "#e3e1e9",
-            "tertiary-fixed-dim": "#e5e7eb",
-            "surface-container-lowest": "#0d0e13",
-            "secondary-fixed-dim": "#7bd0ff",
-            "secondary": "#7bd0ff",
-            "primary-fixed-dim": "#c4c7c9",
-            "on-primary": "#2d3133",
-            "primary": "#ffffff",
-            "outline-variant": "#444749",
-            "secondary-fixed": "#c4e7ff",
-            "surface-container-low": "#1a1b21",
-            "inverse-on-surface": "#2f3036"
+            "background": "#0C0D10",
+            "surface": "#0C0D10",
+            "surface-dim": "#0C0D10",
+            "surface-container-lowest": "#0C0D10",
+            "surface-container-low": "#15181E",
+            "surface-container": "#181B22",
+            "surface-container-high": "#1E222A",
+            "surface-container-highest": "#282D37",
+            "primary": "#F4F5F7",
+            "on-primary": "#0C0D10",
+            "secondary": "#7DD3FC",
+            "secondary-fixed-dim": "#7DD3FC",
+            "secondary-container": "#00374d",
+            "on-secondary": "#0C0D10",
+            "on-surface": "#F4F5F7",
+            "on-surface-variant": "#929BA8",
+            "outline": "#929BA8",
+            "outline-variant": "#292D34",
+            "border": "#292D34",
+            "border-subtle": "#292D34",
+            "accent": "#7DD3FC",
+            "success": "#6ED6A0",
+            "error": "#F87171",
+            "error-container": "#3C1818",
+            "on-error": "#FFFFFF",
+            "tertiary": "#7DD3FC",
+            "tertiary-fixed": "#7DD3FC",
+            "tertiary-container": "#181B22",
+            "primary-container": "#1E222A",
+            "on-primary-container": "#F4F5F7"
           },
           borderRadius: {
-            "DEFAULT": "0.125rem",
-            "lg": "0.25rem",
-            "xl": "0.5rem",
-            "full": "0.75rem"
+            "DEFAULT": "0.25rem",
+            "sm": "0.25rem",
+            "md": "0.375rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "2xl": "1rem",
+            "full": "9999px"
           },
           spacing: {
             "space-sm": "0.5rem",
@@ -87,38 +73,36 @@
             "space-md": "1rem"
           },
           fontFamily: {
-            "headline-lg-mobile": ["Poppins", "sans-serif"],
-            "headline-2xl-mobile": ["Poppins", "sans-serif"],
-            "headline-2xl": ["Poppins", "sans-serif"],
+            "sans": ["Inter", "system-ui", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+            "heading": ["Inter", "Poppins", "sans-serif"],
+            "body": ["Inter", "sans-serif"],
+            "body-md": ["Inter", "sans-serif"],
+            "body-sm": ["Inter", "sans-serif"],
+            "body-lg": ["Inter", "sans-serif"],
             "label-mono": ["JetBrains Mono", "monospace"],
             "label-mono-sm": ["JetBrains Mono", "monospace"],
-            "headline-xl-mobile": ["Poppins", "sans-serif"],
-            "headline-xl": ["Poppins", "sans-serif"],
-            "headline-md": ["Poppins", "sans-serif"],
-            "headline-lg": ["Poppins", "sans-serif"],
-            "heading": ["Poppins", "sans-serif"],
-            "body": ["Open Sans", "sans-serif"],
-            "body-md": ["Open Sans", "sans-serif"],
-            "body-sm": ["Open Sans", "sans-serif"],
-            "body-lg": ["Open Sans", "sans-serif"],
+            "headline-2xl": ["Inter", "sans-serif"],
+            "headline-xl": ["Inter", "sans-serif"],
+            "headline-lg": ["Inter", "sans-serif"],
+            "headline-md": ["Inter", "sans-serif"],
             "citation": ["Georgia", "Cambria", "'Times New Roman'", "serif"],
             "serif": ["Georgia", "Cambria", "'Times New Roman'", "serif"],
             "quote": ["Georgia", "serif"],
-            "meta": ["Open Sans", "sans-serif"]
+            "meta": ["Inter", "sans-serif"]
           },
           fontSize: {
-            "headline-lg-mobile": ["28px", { "lineHeight": "34px", "letterSpacing": "-0.02em", "fontWeight": "500" }],
-            "headline-2xl-mobile": ["44px", { "lineHeight": "48px", "letterSpacing": "-0.03em", "fontWeight": "600" }],
-            "headline-2xl": ["80px", { "lineHeight": "84px", "letterSpacing": "-0.04em", "fontWeight": "600" }],
-            "label-mono": ["12px", { "lineHeight": "16px", "letterSpacing": "0.04em", "fontWeight": "500" }],
-            "label-mono-sm": ["10px", { "lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "500" }],
-            "headline-xl-mobile": ["36px", { "lineHeight": "40px", "letterSpacing": "-0.025em", "fontWeight": "500" }],
-            "headline-xl": ["56px", { "lineHeight": "60px", "letterSpacing": "-0.035em", "fontWeight": "500" }],
-            "headline-md": ["24px", { "lineHeight": "30px", "letterSpacing": "-0.02em", "fontWeight": "500" }],
-            "headline-lg": ["36px", { "lineHeight": "42px", "letterSpacing": "-0.03em", "fontWeight": "500" }],
-            "body-md": ["15px", { "lineHeight": "24px", "letterSpacing": "-0.005em", "fontWeight": "400" }],
+            "headline-lg-mobile": ["26px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+            "headline-2xl-mobile": ["40px", { "lineHeight": "46px", "letterSpacing": "-0.03em", "fontWeight": "600" }],
+            "headline-2xl": ["72px", { "lineHeight": "76px", "letterSpacing": "-0.035em", "fontWeight": "700" }],
+            "label-mono": ["12px", { "lineHeight": "16px", "letterSpacing": "0.03em", "fontWeight": "500" }],
+            "label-mono-sm": ["11px", { "lineHeight": "14px", "letterSpacing": "0.04em", "fontWeight": "500" }],
+            "headline-xl-mobile": ["32px", { "lineHeight": "38px", "letterSpacing": "-0.025em", "fontWeight": "600" }],
+            "headline-xl": ["48px", { "lineHeight": "52px", "letterSpacing": "-0.03em", "fontWeight": "600" }],
+            "headline-md": ["22px", { "lineHeight": "28px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+            "headline-lg": ["32px", { "lineHeight": "38px", "letterSpacing": "-0.025em", "fontWeight": "600" }],
+            "body-md": ["14px", { "lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "400" }],
             "body-sm": ["13px", { "lineHeight": "20px", "letterSpacing": "0em", "fontWeight": "400" }],
-            "body-lg": ["18px", { "lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "400" }]
+            "body-lg": ["16px", { "lineHeight": "26px", "letterSpacing": "-0.01em", "fontWeight": "400" }]
           }
         }
       }
@@ -126,7 +110,7 @@
   </script>
 </head>
 
-<body class="bg-background text-on-surface font-body-md text-body-md antialiased min-h-screen selection:bg-surface-variant selection:text-primary">
+<body class="bg-[#0C0D10] text-[#F4F5F7] font-sans antialiased min-h-screen selection:bg-[#7DD3FC]/20 selection:text-[#7DD3FC]">
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
 </body>

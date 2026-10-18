@@ -160,6 +160,14 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class GoogleAuthRequest(BaseModel):
+    credential: Optional[str] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    google_id: Optional[str] = None
+
+
 class UserResponse(BaseModel):
     id: str
     email: str

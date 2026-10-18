@@ -1,6 +1,7 @@
 import { useState } from "react";
 import MermaidViewer from "./MermaidViewer";
 import { formatAgentName } from "./agentNames";
+import { getCleanFileName, stripQuotes } from "./sourceUtils";
 
 const WORKSPACE_TABS = [
   ["brd", "Requirements"],
@@ -15,66 +16,95 @@ function FindingRow({ finding, source, selected, onOpenEvidence }) {
   const confidence = typeof finding.confidence === "number" && Number.isFinite(finding.confidence)
     ? `${Math.round(finding.confidence * 100)}%`
     : null;
+  const fileName = source?.file_name || getCleanFileName(finding.source_id);
 
   return (
     <button
       type="button"
-      className={`brd-line requirements-document__finding ${selected ? "is-selected" : ""}`}
+      className={`w-full text-left py-2.5 px-3 rounded-lg hover:bg-white/[0.03] transition-colors flex flex-col gap-1 ${selected ? "bg-[#7DD3FC]/10" : ""}`}
       title="Open source evidence"
       aria-label={`Open evidence for: ${finding.statement}`}
       aria-pressed={selected}
       onClick={() => onOpenEvidence(finding.id)}
     >
-      <span className="requirements-document__finding-text">{finding.statement}</span>
-      <span className="requirements-document__finding-meta">
+      <span className="text-xs text-[#F4F5F7] font-medium leading-relaxed">{finding.statement}</span>
+      <span className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-[#929BA8]">
         {finding.type && <span>{finding.type.replace(/_/g, " ")}</span>}
-        {finding.priority && <span>{finding.priority} priority</span>}
-        {finding.agent && <span>{formatAgentName(finding.agent)}</span>}
-        {(source?.file_name || finding.source_id) && (
-          <span className="requirements-document__source">
-            Evidence · {source?.file_name || finding.source_id}
-            {source?.page_or_ts && ` · ${source.page_or_ts}`}
+        {finding.priority && <span>· {finding.priority} priority</span>}
+        {finding.agent && <span>· {formatAgentName(finding.agent)}</span>}
+        {fileName && (
+          <span className="text-[#7DD3FC]">
+            · Evidence: {fileName}
+            {source?.page_or_ts && ` (${source.page_or_ts})`}
           </span>
         )}
-        {confidence && <span>Confidence · {confidence}</span>}
-        {finding.review_status && <span>{finding.review_status}</span>}
+        {confidence && <span className="text-[#6ED6A0]">· {confidence}</span>}
       </span>
     </button>
   );
 }
 
-function ConflictReview({ conflict, onResolve }) {
+function ConflictReview({ conflict, onResolve, chunks = [] }) {
+  const leftFileName = getCleanFileName(conflict.left?.source_id || conflict.left?.statement, chunks);
+  const rightFileName = getCleanFileName(conflict.right?.source_id || conflict.right?.statement, chunks);
+  const isResolved = conflict.status !== "open";
+
   return (
-    <div className={`conflict requirements-document__conflict ${conflict.status !== "open" ? "is-resolved" : ""}`} key={conflict.id}>
-      <div className="requirements-document__conflict-heading">
-        <span className={`requirements-document__conflict-status ${conflict.status === "open" ? "is-open" : ""}`}>
-          {conflict.status === "open" ? "Needs review" : "Resolved"}
+    <div className="py-5 border-b border-[#292D34] space-y-3" key={conflict.id}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className={`w-1.5 h-1.5 rounded-full ${isResolved ? "bg-[#6ED6A0]" : "bg-amber-400 animate-pulse"}`} />
+          <strong className="text-sm font-semibold text-[#F4F5F7]">{conflict.topic}</strong>
+        </div>
+        <span className={`font-mono text-[11px] ${isResolved ? "text-[#6ED6A0]" : "text-amber-300"}`}>
+          {isResolved ? "Resolved" : "Requires Decision"}
         </span>
-        <strong>{conflict.topic}</strong>
       </div>
-      <p>{conflict.disagreement}</p>
-      <div className="split">
-        <div>
-          <em className="metadata-italic text-secondary">Source A</em>
-          <blockquote className="citation font-citation italic text-sm my-2">“{conflict.left.statement}”</blockquote>
+      <p className="text-xs text-[#929BA8] leading-relaxed">{conflict.disagreement}</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+        <div className="p-3.5 rounded-xl bg-[#15181E] border border-[#292D34] space-y-2">
+          <div className="text-[11px] font-mono text-[#7DD3FC] flex items-center gap-1 font-semibold">
+            <span className="material-symbols-outlined text-[13px]">description</span>
+            <span>Source: <strong className="text-[#F4F5F7]">{leftFileName}</strong></span>
+          </div>
+          <div className="pl-3 py-1 border-l-2 border-[#7DD3FC]/50 text-xs italic text-[#929BA8] leading-relaxed">
+            "{stripQuotes(conflict.left.statement)}"
+          </div>
+          {conflict.status === "open" && (
+            <button
+              type="button"
+              className="mt-2 px-3 py-1.5 rounded-md bg-[#7DD3FC] text-black font-semibold text-xs hover:bg-[#7DD3FC]/90 transition-colors"
+              onClick={() => onResolve(conflict.id, "left")}
+            >
+              Adopt Option A ({leftFileName})
+            </button>
+          )}
         </div>
-        <div>
-          <em className="metadata-italic text-secondary">Source B</em>
-          <blockquote className="citation font-citation italic text-sm my-2">“{conflict.right.statement}”</blockquote>
+        <div className="p-3.5 rounded-xl bg-[#15181E] border border-[#292D34] space-y-2">
+          <div className="text-[11px] font-mono text-[#7DD3FC] flex items-center gap-1 font-semibold">
+            <span className="material-symbols-outlined text-[13px]">description</span>
+            <span>Source: <strong className="text-[#F4F5F7]">{rightFileName}</strong></span>
+          </div>
+          <div className="pl-3 py-1 border-l-2 border-[#7DD3FC]/50 text-xs italic text-[#929BA8] leading-relaxed">
+            "{stripQuotes(conflict.right.statement)}"
+          </div>
+          {conflict.status === "open" && (
+            <button
+              type="button"
+              className="mt-2 px-3 py-1.5 rounded-md bg-[#181B22] text-[#F4F5F7] border border-[#292D34] hover:bg-[#292D34] font-semibold text-xs transition-colors"
+              onClick={() => onResolve(conflict.id, "right")}
+            >
+              Adopt Option B ({rightFileName})
+            </button>
+          )}
         </div>
       </div>
-      {conflict.suggested_question && <p className="muted">{conflict.suggested_question}</p>}
-      {conflict.status === "open" && (
-        <div className="row">
-          <button type="button" className="btn" onClick={() => onResolve(conflict.id, "left")}>
-            Keep Source A
-          </button>
-          <button type="button" className="btn primary" onClick={() => onResolve(conflict.id, "right")}>
-            Keep Source B
-          </button>
-        </div>
+      {conflict.suggested_question && (
+        <p className="text-xs text-[#929BA8] italic pl-3 border-l-2 border-[#292D34] my-2">{conflict.suggested_question}</p>
       )}
-      {conflict.resolution && <p className="requirements-document__resolution">{conflict.resolution}</p>}
+      {conflict.resolution && (
+        <p className="text-xs text-[#6ED6A0] font-mono">Decision: {conflict.resolution}</p>
+      )}
     </div>
   );
 }
@@ -207,7 +237,7 @@ export default function RequirementsDocument({
                     </div>
                   ) : section.id === "open_conflicts" ? (
                     conflicts.length > 0 ? conflicts.map((conflict) => (
-                      <ConflictReview key={conflict.id} conflict={conflict} onResolve={onResolveConflict} />
+                      <ConflictReview key={conflict.id} conflict={conflict} onResolve={onResolveConflict} chunks={chunks} />
                     )) : <div className="section-body">{section.body}</div>
                   ) : sectionFindings.length > 0 ? (
                     <div className="requirements-document__findings">

@@ -75,7 +75,7 @@ def get_client_identifier(request: Request) -> str:
 
 def get_endpoint_tier(path: str) -> Tuple[str, int, float]:
     """Classifies path into appropriate rate limit tier."""
-    if path.startswith("/api/auth/login") or path.startswith("/api/auth/signup") or path.startswith("/api/auth/reset-password"):
+    if path.startswith("/api/auth/login") or path.startswith("/api/auth/signup") or path.startswith("/api/auth/reset-password") or path.startswith("/api/auth/google"):
         return "auth", TIER_AUTH[0], TIER_AUTH[1]
     if path.startswith("/api/upload"):
         return "upload", TIER_UPLOAD[0], TIER_UPLOAD[1]

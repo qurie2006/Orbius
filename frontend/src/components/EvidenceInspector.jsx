@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { formatAgentName } from "./agentNames";
+import { getCleanFileName, stripQuotes } from "./sourceUtils";
 
 export default function EvidenceInspector({ evidence, onClose }) {
   const closeButtonRef = useRef(null);
@@ -28,8 +29,10 @@ export default function EvidenceInspector({ evidence, onClose }) {
 
   const finding = evidence.finding;
   const chunk = evidence.chunk;
+  const rawFile = chunk?.file_name || chunk?.source_id || finding?.source_id;
+  const cleanFileName = getCleanFileName(rawFile);
   const location = [
-    chunk?.file_name || chunk?.source_id,
+    cleanFileName,
     chunk?.page_or_ts,
   ].filter(Boolean).join(" · ");
   const excerpt = finding?.source_span || chunk?.text;
@@ -64,7 +67,12 @@ export default function EvidenceInspector({ evidence, onClose }) {
       {!finding && typeof evidence.confidence === "number" && Number.isFinite(evidence.confidence) && (
         <p className="muted">Copilot-reported confidence · {Math.round(evidence.confidence * 100)}%</p>
       )}
-      {location && <p className="evidence-location">{location}</p>}
+      {location && (
+        <div className="evidence-location flex items-center gap-1.5 text-xs text-secondary font-mono py-1">
+          <span className="material-symbols-outlined text-[14px]">description</span>
+          <span>Source File: <strong className="text-white font-semibold">{cleanFileName}</strong>{chunk?.page_or_ts ? ` · ${chunk.page_or_ts}` : ""}</span>
+        </div>
+      )}
       {evidence.citationUnverified && (
         <p className="evidence-unverified-note">
           This source is present in the workspace, but its relevance to the Copilot answer has not been verified.
@@ -75,7 +83,13 @@ export default function EvidenceInspector({ evidence, onClose }) {
           <span className="evidence-drawer__section-label">
             {finding ? "SOURCE EXCERPT" : "CITED SOURCE EXCERPT"}
           </span>
-          <blockquote className="evidence-source-excerpt citation">“{excerpt}”</blockquote>
+          <div className="evidence-source-excerpt citation font-citation text-xs leading-relaxed p-3 bg-surface-container rounded border-l-2 border-secondary">
+            <div className="text-[10px] uppercase font-mono text-outline mb-1 font-semibold flex items-center justify-between">
+              <span>Cited Text</span>
+              <span className="text-secondary font-mono">{cleanFileName}</span>
+            </div>
+            <p className="m-0 italic text-on-surface-variant">{stripQuotes(excerpt)}</p>
+          </div>
         </section>
       )}
       {!location && !excerpt && (

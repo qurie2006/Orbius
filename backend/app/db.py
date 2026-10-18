@@ -146,6 +146,18 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN salt TEXT")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN provider TEXT DEFAULT 'local'")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
+        except sqlite3.OperationalError:
+            pass
 
 
 def create_user(email: str, password: str, name: str) -> Dict[str, Any]:
@@ -158,6 +170,44 @@ def create_user(email: str, password: str, name: str) -> Dict[str, Any]:
             (user_id, email.lower().strip(), hashed, salt, name.strip(), now_str),
         )
     return {"id": user_id, "email": email.lower().strip(), "name": name.strip(), "created_at": now_str}
+
+
+def create_or_login_oauth_user(
+    email: str,
+    name: str,
+    provider: str = "google",
+    avatar_url: Optional[str] = None,
+    google_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    existing = get_user_by_email(email)
+    now_str = get_now().isoformat()
+    if existing:
+        with connect() as conn:
+            conn.execute(
+                "UPDATE users SET name = COALESCE(NULLIF(name, ''), ?), avatar_url = COALESCE(avatar_url, ?), google_id = COALESCE(google_id, ?) WHERE LOWER(email) = ?",
+                (name.strip(), avatar_url, google_id, email.lower().strip()),
+            )
+        existing["name"] = name.strip() or existing.get("name")
+        if avatar_url:
+            existing["avatar_url"] = avatar_url
+        return existing
+
+    user_id = f"usr_{uuid.uuid4().hex[:10]}"
+    hashed, salt = hash_password(uuid.uuid4().hex)
+    clean_name = name.strip() or email.split("@")[0].capitalize()
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, salt, name, created_at, provider, avatar_url, google_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, email.lower().strip(), hashed, salt, clean_name, now_str, provider, avatar_url, google_id),
+        )
+    return {
+        "id": user_id,
+        "email": email.lower().strip(),
+        "name": clean_name,
+        "created_at": now_str,
+        "provider": provider,
+        "avatar_url": avatar_url,
+    }
 
 
 

@@ -23,6 +23,7 @@ from app.file_security import validate_file_upload, sanitize_filename, MAX_FILE_
 from app.schemas import (
     ChatRequest,
     Finding,
+    GoogleAuthRequest,
     LoginRequest,
     ResetPasswordRequest,
     ResolveConflictRequest,
@@ -52,8 +53,12 @@ app.add_middleware(RateLimitMiddleware)
 
 db.init_db()
 UPLOADS: dict[str, list] = {}
-def get_auth_user(authorization: Optional[str] = Header(None), x_user_id: Optional[str] = Header(None)) -> Optional[dict]:
-    token = authorization or x_user_id
+def get_auth_user(
+    authorization: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None),
+    token_query: Optional[str] = None,
+) -> Optional[dict]:
+    token = authorization or x_user_id or token_query
     if not token:
         return None
     token_str = token.replace("Bearer ", "").strip()
@@ -71,10 +76,9 @@ def get_tenant_folder(session_id: str, user: Optional[dict] = None) -> str:
     if user and user.get("id"):
         uid = str(user["id"])
         return uid if uid.startswith("usr_") else f"usr_{uid}"
-    if session_id.startswith("usr_"):
-        # Derive tenant folder from user-scoped session ID (e.g. usr_12345_workspace -> usr_12345)
-        return session_id.split("_workspace")[0]
-    # Anonymous isolated workspace namespace
+    if session_id and session_id.startswith("usr_"):
+        parts = session_id.split("_workspace")[0]
+        return parts if parts.startswith("usr_") else f"usr_{parts}"
     return session_id if session_id.startswith("anon_") else f"anon_{session_id}"
 
 
@@ -97,16 +101,20 @@ def check_session_access(session_id: str, user: Optional[dict] = None) -> bool:
 
 
 def get_uploads_cache(session_id: str, user: Optional[dict] = None) -> list:
-    """Retrieves uploaded chunks from tenant-isolated in-memory cache."""
-    tenant = get_tenant_folder(session_id, user)
-    cache_key = f"{tenant}:{session_id}"
-    if cache_key in UPLOADS:
-        return UPLOADS[cache_key]
-    # Check alternate or direct keys
+    """Retrieves uploaded chunks from tenant-isolated in-memory cache with fallback matching."""
+    folder = get_tenant_folder(session_id, user)
+    keys_to_check = [
+        f"{folder}:{session_id}",
+        f"usr_{folder}:{session_id}",
+        f"anon_{session_id}:{session_id}",
+        session_id,
+    ]
+    for k in keys_to_check:
+        if k in UPLOADS and UPLOADS[k]:
+            return UPLOADS[k]
     for k, v in UPLOADS.items():
-        if k == session_id or k.endswith(f":{session_id}") or k == f"usr_{session_id}" or k.startswith(f"{tenant}:"):
-            if v:
-                return v
+        if (k == session_id or k.endswith(f":{session_id}") or k.startswith(f"{folder}:")) and v:
+            return v
     return []
 
 
@@ -125,6 +133,7 @@ def set_uploads_cache(session_id: str, chunks: list, user: Optional[dict] = None
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 def health():
     return {"ok": True, "name": "Orbius", "status": "healthy", "now": get_now().isoformat()}
+
 
 
 @app.post("/api/auth/signup")
@@ -148,6 +157,50 @@ def login(req: LoginRequest):
     if not user or not db.verify_password(req.password, user["password_hash"], user.get("salt")):
         return JSONResponse({"error": "Invalid email or password."}, status_code=401)
     user_data = {"id": user["id"], "email": user["email"], "name": user["name"], "created_at": user["created_at"]}
+    token = db.create_session_token(user["id"], user["email"])
+    return {"user": user_data, "token": token}
+
+
+@app.post("/api/auth/google")
+def google_auth(req: GoogleAuthRequest):
+    email = req.email
+    name = req.name or "Google User"
+    avatar_url = req.avatar_url
+    google_id = req.google_id
+
+    # If raw credential JWT token from Google Identity Services is provided, decode payload
+    if req.credential:
+        try:
+            import base64
+            parts = req.credential.split(".")
+            if len(parts) >= 2:
+                padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+                payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+                email = payload.get("email") or email
+                name = payload.get("name") or name
+                avatar_url = payload.get("picture") or avatar_url
+                google_id = payload.get("sub") or google_id
+        except Exception:
+            pass
+
+    if not email or "@" not in email:
+        return JSONResponse({"error": "A valid Google account email is required."}, status_code=400)
+
+    user = db.create_or_login_oauth_user(
+        email=email,
+        name=name,
+        provider="google",
+        avatar_url=avatar_url,
+        google_id=google_id,
+    )
+    user_data = {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "avatar_url": user.get("avatar_url"),
+        "created_at": user.get("created_at"),
+        "provider": "google",
+    }
     token = db.create_session_token(user["id"], user["email"])
     return {"user": user_data, "token": token}
 
@@ -309,9 +362,11 @@ async def upload(
     # Automatically index all chunks into Vector Database
     try:
         from app.vector_store import vector_store
-        vector_store.add_chunks(f"{tenant_folder}_{session_id}", merged_chunks)
-    except Exception:
-        pass
+        vector_store.add_chunks(session_id, merged_chunks)
+        if tenant_folder:
+            vector_store.add_chunks(f"{tenant_folder}_{session_id}", merged_chunks)
+    except Exception as e:
+        logger.warning("Vector store upload indexing warning: %s", e)
 
     # Return distinct list of uploaded files with metadata
     unique_files = []
@@ -474,6 +529,15 @@ async def rag_chat(payload: RagChatPayload):
     # 1. Semantic search in vector store
     from app.vector_store import vector_store
     relevant_chunks = vector_store.search(session_id, user_query, top_k=6)
+    if not relevant_chunks:
+        # Check if chunks are in memory or demo pack but need vector indexing
+        unindexed = UPLOADS.get(session_id) or []
+        if not unindexed and session_id == "demo":
+            unindexed = load_demo_chunks()
+            UPLOADS[session_id] = unindexed
+        if unindexed:
+            vector_store.add_chunks(session_id, unindexed)
+            relevant_chunks = vector_store.search(session_id, user_query, top_k=6)
 
     # 2. Extract current state specs & tasks
     state = SESSIONS.get(session_id) or db.load_session(session_id) or {}
@@ -713,6 +777,11 @@ def list_projects(authorization: Optional[str] = Header(None), x_user_id: Option
 def load_demo(session_id: str = "demo"):
     chunks = load_demo_chunks()
     UPLOADS[session_id] = chunks
+    try:
+        from app.vector_store import vector_store
+        vector_store.add_chunks(session_id, chunks)
+    except Exception as e:
+        logger.warning("Demo pack vector indexing warning: %s", e)
     unique = list({c.file_name: c for c in chunks}.values())
     return {
         "status": "loaded",
@@ -739,11 +808,11 @@ def reset_session(session_id: str = "demo", x_user_id: Optional[str] = Header(No
 async def generate(
     session_id: str = "demo",
     project_description: str = "",
-    token: Optional[str] = None,
+    token: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
     x_user_id: Optional[str] = Header(None),
 ):
-    user = get_auth_user(authorization, x_user_id or token)
+    user = get_auth_user(authorization, x_user_id, token)
     if not check_session_access(session_id, user):
         async def denied_events():
             yield {"event": "error", "data": json.dumps({"error": "Access denied: You do not own this workspace."})}
@@ -765,28 +834,37 @@ async def generate(
         tenant_folder = get_tenant_folder(session_id, user)
         candidate_dirs = [
             settings.upload_dir / tenant_folder / session_id,
-            settings.upload_dir / session_id,
             settings.upload_dir / f"usr_{tenant_folder}" / session_id,
+            settings.upload_dir / session_id,
         ]
         if settings.upload_dir.exists():
             for sub in settings.upload_dir.iterdir():
                 if sub.is_dir() and (sub / session_id).is_dir():
                     candidate_dirs.append(sub / session_id)
+        # Also check all directory matches ending with session_id
+        for match in settings.upload_dir.glob(f"*/{session_id}"):
+            if match not in candidate_dirs:
+                candidate_dirs.append(match)
 
-        disk_chunks = []
-        for dest_dir in candidate_dirs:
-            if dest_dir.exists():
-                for p in sorted(dest_dir.iterdir()):
-                    if p.is_file():
-                        try:
-                            data = p.read_bytes()
-                            disk_chunks.extend(ingest_bytes(p.name, data, p))
-                        except Exception:
-                            pass
-                if disk_chunks:
-                    chunks = disk_chunks
-                    set_uploads_cache(session_id, chunks, user)
-                    break
+        dest_dir = None
+        for cd in candidate_dirs:
+            if cd.exists() and any(cd.iterdir()):
+                dest_dir = cd
+                break
+
+        if dest_dir:
+            disk_chunks = []
+            for p in sorted(dest_dir.iterdir()):
+                if p.is_file():
+                    try:
+                        data = p.read_bytes()
+                        disk_chunks.extend(ingest_bytes(p.name, data, p))
+                    except Exception as e:
+                        logger.warning("Error ingesting disk file %s: %s", p.name, e)
+            if disk_chunks:
+                chunks = disk_chunks
+                set_uploads_cache(session_id, chunks, user)
+
 
     if not chunks and session_id == "demo":
         # 3. For demo session, fallback to prepackaged demo chunks
@@ -847,6 +925,13 @@ async def generate(
 
     seq = 0
     effective_user_id = user["id"] if user else (x_user_id or None)
+
+    # Ensure all session chunks are indexed in the Vector Database
+    try:
+        from app.vector_store import vector_store
+        vector_store.add_chunks(session_id, chunks)
+    except Exception as e:
+        logger.warning("Pipeline vector indexing warning: %s", e)
 
     async def events():
         nonlocal seq
@@ -1195,11 +1280,51 @@ def get_scorecard(session_id: Optional[str] = Query(None)):
     from app.prototype_agent import get_accuracy_scorecard
     sess_id = session_id or "demo"
     state = SESSIONS.get(sess_id) or db.load_session(sess_id) or {}
-    findings = [Finding.model_validate(f) for f in state.get("findings", [])]
-    chunks = [SourceChunk.model_validate(c) for c in (state.get("chunks") or UPLOADS.get(sess_id) or [])]
-    conflicts = state.get("conflicts", [])
-    gaps = state.get("gaps", [])
+    raw_findings = state.get("findings", []) if isinstance(state, dict) else getattr(state, "findings", [])
+    raw_chunks = (state.get("chunks", []) if isinstance(state, dict) else getattr(state, "chunks", [])) or UPLOADS.get(sess_id) or []
+    if not raw_chunks and sess_id == "demo":
+        raw_chunks = load_demo_chunks()
+    findings = []
+    for f in raw_findings:
+        try:
+            findings.append(Finding.model_validate(f))
+        except Exception:
+            pass
+    chunks = []
+    for c in raw_chunks:
+        try:
+            chunks.append(SourceChunk.model_validate(c))
+        except Exception:
+            pass
+    conflicts = state.get("conflicts", []) if isinstance(state, dict) else getattr(state, "conflicts", [])
+    gaps = state.get("gaps", []) if isinstance(state, dict) else getattr(state, "gaps", [])
     return get_accuracy_scorecard(findings, chunks, conflicts, gaps)
+
+
+@app.get("/api/vector/status")
+def get_vector_status(session_id: str = "demo"):
+    """Returns vector database status, active engine, and total indexed chunks."""
+    from app.vector_store import vector_store
+    return vector_store.get_status(session_id)
+
+
+class VectorSearchRequest(BaseModel):
+    session_id: str = "demo"
+    query: str
+    top_k: int = 5
+
+
+@app.post("/api/vector/search")
+def perform_vector_search(payload: VectorSearchRequest):
+    """Direct semantic vector search endpoint across all indexed session documents."""
+    from app.vector_store import vector_store
+    results = vector_store.search(payload.session_id, payload.query, top_k=payload.top_k)
+    return {
+        "session_id": payload.session_id,
+        "query": payload.query,
+        "count": len(results),
+        "results": results,
+    }
 
 
 @app.post("/api/meeting/interrupter")
@@ -1619,6 +1744,3 @@ def download_test_pack():
     return JSONResponse({"error": "Dataset zip not found"}, status_code=404)
 
 
-@app.api_route("/", methods=["GET", "HEAD"])
-def root():
-    return {"service": "orbius-api", "docs": "/docs"}

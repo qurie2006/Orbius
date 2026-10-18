@@ -16,3 +16,4 @@ backend/*.pid
 frontend/*.pid
 backend/chroma_db
 chroma_db
+*.zip

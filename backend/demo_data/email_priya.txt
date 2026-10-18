@@ -1,6 +1,6 @@
 From: Priya Patel <priya.patel@aethercloud.io>
 To: Jordan Hale <jordan@orbius.dev>
-Date: 2026-10-17
+Date: 2026-10-18
 Subject: AetherCloud Enterprise Launch — Architecture & SLA Mandates
 
 Hi Jordan,

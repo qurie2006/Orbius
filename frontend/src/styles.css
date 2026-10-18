@@ -1,8 +1,17 @@
 @import url('https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,300;1,400;1,500;1,600;1,700&family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,300;1,400;1,500;1,600;1,700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
 
 :root {
-  --font-heading: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-body: 'Open Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --bg-main: #0C0D10;
+  --surface-main: #15181E;
+  --surface-elevated: #181B22;
+  --border-subtle: #292D34;
+  --accent-cyan: #7DD3FC;
+  --text-primary: #F4F5F7;
+  --text-secondary: #929BA8;
+  --color-success: #6ED6A0;
+  --color-error: #F87171;
+  --font-heading: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-citation: 'Georgia', Cambria, 'Times New Roman', Times, serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -11,8 +20,8 @@
   html {
     margin: 0;
     padding: 0;
-    background-color: #121318;
-    color: #e3e1e9;
+    background-color: #0C0D10;
+    color: #F4F5F7;
     overflow-x: clip;
     overflow-y: auto;
     scroll-behavior: smooth;
@@ -21,8 +30,8 @@
   body {
     margin: 0;
     padding: 0;
-    background-color: #121318;
-    color: #e3e1e9;
+    background-color: #0C0D10;
+    color: #F4F5F7;
     font-family: var(--font-body);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     text-rendering: optimizeLegibility;
@@ -35,6 +44,7 @@
 
   #root {
     min-height: 100vh;
+    background-color: #0C0D10;
   }
 }
 
@@ -266,20 +276,122 @@ kbd {
   animation: pulseGlow 10s ease-in-out infinite;
 }
 
-/* Mermaid graph container */
-.mermaid-svg-container {
+/* Mermaid graph container & viewport */
+.mermaid-svg-container,
+.mermaid-viewport {
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: center;
   margin: 0 auto;
   width: 100%;
+  max-width: 100%;
+  max-height: 440px;
+  overflow: auto;
+  background: rgba(15, 17, 23, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 16px;
+  box-sizing: border-box;
 }
-.mermaid-svg-container svg {
+
+.mermaid-svg-container svg,
+.mermaid-viewport svg {
   max-width: 100% !important;
+  max-height: 400px !important;
   height: auto !important;
+  width: auto !important;
   margin: 0 auto !important;
   display: block;
+}
+
+.mermaid-card {
+  background: var(--surface-container-low, #181920);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.mermaid-card.fullscreen {
+  position: fixed;
+  inset: 20px;
+  z-index: 9999;
+  background: #0f1015;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+}
+
+.mermaid-card.fullscreen .mermaid-viewport {
+  max-height: calc(100vh - 120px);
+  height: 100%;
+  flex: 1;
+}
+
+.mermaid-card.fullscreen .mermaid-viewport svg {
+  max-height: calc(100vh - 160px) !important;
+}
+
+.mermaid-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.diagram-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.diagram-tabs .tab-btn {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-family: inherit;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--on-surface-variant, #94a3b8);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.diagram-tabs .tab-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.diagram-tabs .tab-btn.active {
+  background: rgba(2, 132, 199, 0.2);
+  border-color: #0284c7;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.mermaid-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.mermaid-controls .btn {
+  padding: 5px 10px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--on-surface, #e2e8f0);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.mermaid-controls .btn:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* ========================================================
@@ -645,3 +757,97 @@ kbd {
   0% { background-position: 0% 0%; }
   100% { background-position: 200% 0%; }
 }
+
+/* ========================================================
+   BORDERLESS AI-NATIVE WORKSPACE DESIGN SYSTEM
+   ======================================================== */
+
+/* Understated text navigation with subtle cyan active indicator */
+.studio-nav-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #929BA8;
+  transition: color 0.15s ease;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.studio-nav-item:hover {
+  color: #F4F5F7;
+}
+
+.studio-nav-item.is-active {
+  color: #F4F5F7;
+}
+
+.studio-nav-item.is-active::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #7DD3FC;
+  border-radius: 9999px;
+  box-shadow: 0 0 10px rgba(125, 211, 252, 0.4);
+}
+
+/* Subtle charcoal surface without heavy borders */
+.borderless-surface {
+  background-color: #15181E;
+  border-radius: 0.75rem;
+}
+
+/* Document section layout */
+.doc-section-card {
+  position: relative;
+  background-color: #15181E;
+  border-radius: 0.75rem;
+  padding: 1.75rem;
+  transition: background-color 0.2s ease;
+}
+
+.doc-section-divider {
+  height: 1px;
+  background-color: #292D34;
+  margin: 1.5rem 0;
+}
+
+/* Unified input surface */
+.unified-input-surface {
+  background-color: #15181E;
+  border-radius: 0.875rem;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.unified-input-surface:focus-within {
+  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(125, 211, 252, 0.25);
+}
+
+/* Custom minimal scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #292D34;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3B424D;
+}
+

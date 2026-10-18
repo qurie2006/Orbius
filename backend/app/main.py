@@ -606,6 +606,24 @@ def download_brd_pdf_stream(
     )
 
 
+@app.get("/api/report/pdf")
+def download_project_report_pdf():
+    """Download the comprehensive project and architecture report as PDF."""
+    candidates = [
+        Path(__file__).parent.parent.parent / "Orbius_Comprehensive_Project_Report.pdf",
+        Path(__file__).parent.parent / "Orbius_Comprehensive_Project_Report.pdf",
+        Path(r"C:\Users\Qurie Rawat\.gemini\antigravity-ide\brain\10f55dfa-10f9-47ab-aee4-0fa76836686f\Orbius_Comprehensive_Project_Report.pdf"),
+    ]
+    pdf_path = next((p for p in candidates if p.exists()), None)
+    if not pdf_path:
+        return JSONResponse({"error": "Report PDF not found."}, status_code=404)
+    return Response(
+        content=pdf_path.read_bytes(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="Orbius_Comprehensive_Project_Report.pdf"'}
+    )
+
+
 @app.get("/api/mcp/manifest")
 def mcp_manifest():
     """Model Context Protocol (MCP) server manifest and tool capabilities."""

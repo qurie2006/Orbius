@@ -3,7 +3,7 @@ import mermaid from "mermaid";
 import LiquidAuroraBackground from "./components/LiquidAuroraBackground";
 import MultimodalCore from "./components/MultimodalCore";
 
-export function getActiveSessionId(currentUser) {
+function getActiveSessionId(currentUser) {
   try {
     if (currentUser && (currentUser.id || currentUser.email)) {
       const cleanId = String(currentUser.id || currentUser.email).replace(/[^a-zA-Z0-9_-]/g, "_");

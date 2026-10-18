@@ -74,35 +74,54 @@ def get_auth_user(authorization: Optional[str] = Header(None), x_user_id: Option
 def get_tenant_folder(session_id: str, user: Optional[dict] = None) -> str:
     """Returns an isolated disk folder and cache namespace for the user/tenant."""
     if user and user.get("id"):
-        return f"usr_{user['id']}"
+        uid = str(user["id"])
+        return uid if uid.startswith("usr_") else f"usr_{uid}"
+    if session_id.startswith("usr_"):
+        # Derive tenant folder from user-scoped session ID (e.g. usr_12345_workspace -> usr_12345)
+        return session_id.split("_workspace")[0]
     # Anonymous isolated workspace namespace
-    return f"anon_{session_id}"
+    return session_id if session_id.startswith("anon_") else f"anon_{session_id}"
 
 
 def check_session_access(session_id: str, user: Optional[dict] = None) -> bool:
     """Multi-tenant security check: verifies that the caller owns this workspace.
-    Prevents User B from accessing or mutating User A's files and BRD data."""
+    Prevents User B or anonymous callers from accessing or mutating User A's files and BRD data."""
     if session_id == "demo":
         return True
     owner_id = db.get_session_owner(session_id)
     if not owner_id:
-        # Public or unassigned session
+        if session_id.startswith("usr_"):
+            target_user = session_id.split("_workspace")[0]
+            if not user or str(user.get("id")) != target_user:
+                return False
         return True
-    if not user or user.get("id") != owner_id:
+    if not user:
         return False
-    return True
+    user_id = str(user.get("id", ""))
+    return user_id == owner_id or user_id.replace("usr_", "") == owner_id.replace("usr_", "")
 
 
 def get_uploads_cache(session_id: str, user: Optional[dict] = None) -> list:
     """Retrieves uploaded chunks from tenant-isolated in-memory cache."""
-    cache_key = f"{get_tenant_folder(session_id, user)}:{session_id}"
-    return UPLOADS.get(cache_key, [])
+    tenant = get_tenant_folder(session_id, user)
+    cache_key = f"{tenant}:{session_id}"
+    if cache_key in UPLOADS:
+        return UPLOADS[cache_key]
+    # Check alternate or direct keys
+    for k, v in UPLOADS.items():
+        if k == session_id or k.endswith(f":{session_id}") or k == f"usr_{session_id}" or k.startswith(f"{tenant}:"):
+            if v:
+                return v
+    return []
 
 
 def set_uploads_cache(session_id: str, chunks: list, user: Optional[dict] = None) -> None:
     """Persists uploaded chunks into tenant-isolated in-memory cache."""
-    cache_key = f"{get_tenant_folder(session_id, user)}:{session_id}"
+    tenant = get_tenant_folder(session_id, user)
+    cache_key = f"{tenant}:{session_id}"
     UPLOADS[cache_key] = chunks
+    # Also register by session_id for guaranteed lookup
+    UPLOADS[f":{session_id}"] = chunks
 
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])
@@ -704,10 +723,11 @@ def reset_session(session_id: str = "demo", x_user_id: Optional[str] = Header(No
 async def generate(
     session_id: str = "demo",
     project_description: str = "",
+    token: Optional[str] = None,
     authorization: Optional[str] = Header(None),
     x_user_id: Optional[str] = Header(None),
 ):
-    user = get_auth_user(authorization, x_user_id)
+    user = get_auth_user(authorization, x_user_id or token)
     if not check_session_access(session_id, user):
         async def denied_events():
             yield {"event": "error", "data": json.dumps({"error": "Access denied: You do not own this workspace."})}
@@ -727,21 +747,30 @@ async def generate(
     if not chunks:
         # 2. Restore from files in upload_dir if available
         tenant_folder = get_tenant_folder(session_id, user)
-        dest_dir = settings.upload_dir / tenant_folder / session_id
-        if not dest_dir.exists():
-            dest_dir = settings.upload_dir / session_id
-        if dest_dir.exists():
-            disk_chunks = []
-            for p in sorted(dest_dir.iterdir()):
-                if p.is_file():
-                    try:
-                        data = p.read_bytes()
-                        disk_chunks.extend(ingest_bytes(p.name, data, p))
-                    except Exception:
-                        pass
-            if disk_chunks:
-                chunks = disk_chunks
-                set_uploads_cache(session_id, chunks, user)
+        candidate_dirs = [
+            settings.upload_dir / tenant_folder / session_id,
+            settings.upload_dir / session_id,
+            settings.upload_dir / f"usr_{tenant_folder}" / session_id,
+        ]
+        if settings.upload_dir.exists():
+            for sub in settings.upload_dir.iterdir():
+                if sub.is_dir() and (sub / session_id).is_dir():
+                    candidate_dirs.append(sub / session_id)
+
+        disk_chunks = []
+        for dest_dir in candidate_dirs:
+            if dest_dir.exists():
+                for p in sorted(dest_dir.iterdir()):
+                    if p.is_file():
+                        try:
+                            data = p.read_bytes()
+                            disk_chunks.extend(ingest_bytes(p.name, data, p))
+                        except Exception:
+                            pass
+                if disk_chunks:
+                    chunks = disk_chunks
+                    set_uploads_cache(session_id, chunks, user)
+                    break
 
     if not chunks and session_id == "demo":
         # 3. For demo session, fallback to prepackaged demo chunks

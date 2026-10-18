@@ -2979,7 +2979,8 @@ export default function App() {
     setEvents([]);
     setView("studio");
 
-    const url = `/api/generate?session_id=${encodeURIComponent(activeSessionId)}&project_description=${encodeURIComponent(description)}`;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("orbius_token") : null;
+    const url = `/api/generate?session_id=${encodeURIComponent(activeSessionId)}&project_description=${encodeURIComponent(description)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
     const es = new EventSource(url);
 
     es.addEventListener("section", (e) => {

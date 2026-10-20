@@ -144,7 +144,10 @@ async function jsonFetch(url, options = {}) {
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
-      if (res.status === 502 || res.status === 503 || res.status === 504 || text.includes("The page")) {
+      if (res.status === 404) {
+        throw new Error(`API route not found (404) at ${url}. The /api proxy to the backend may be missing from the deployment.`);
+      }
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
         throw new Error("Backend server is waking up or temporarily unreachable. Please wait ~30s and try again.");
       }
       throw new Error(`Invalid response from server (${res.status}). Please verify the backend is running.`);

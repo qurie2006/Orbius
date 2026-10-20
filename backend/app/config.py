@@ -19,10 +19,10 @@ class Settings(BaseModel):
     jira_email: Optional[str] = os.getenv("JIRA_EMAIL")
     jira_domain: Optional[str] = os.getenv("JIRA_DOMAIN")
     jwt_secret: str = os.getenv("JWT_SECRET", "orbius_secret_key_2026_enterprise_saas")
-    cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000")
+    cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://orbius-chi.vercel.app")
     primary_model: str = "gemini-3.7-flash"
     fallback_model: str = "gemini-3.5-flash"
-    last_resort_model: str = "gemini-3.1-flash-lite"
+    last_resort_model: str = "gemini-flash-latest"
     max_ops_per_document: int = 6
     ops_confidence_threshold: float = 0.55
 

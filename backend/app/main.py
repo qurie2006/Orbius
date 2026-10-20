@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import uuid
@@ -39,11 +40,14 @@ from app.jira_export import generate_jira_csv, generate_linear_json, push_to_jir
 from app.mesh.ledger import HashChainedLedger
 from app.mesh.relay import mesh_manager
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Orbius", version="0.1.0")
 cors_origins_list = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins_list or ["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=cors_origins_list or ["http://localhost:5173", "http://127.0.0.1:5173", "https://orbius-chi.vercel.app"],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

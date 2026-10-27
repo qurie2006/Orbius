@@ -133,7 +133,15 @@ start.bat
 
 ### macOS and Linux Setup
 
-#### 1. Backend Service (FastAPI)
+#### One-Command Startup
+```bash
+chmod +x start.sh
+./start.sh
+```
+*Automatically provisions the virtual environment, installs dependencies, and launches both services in the background.*
+
+#### Manual Setup
+##### 1. Backend Service (FastAPI)
 ```bash
 cd backend
 python3 -m venv .venv
